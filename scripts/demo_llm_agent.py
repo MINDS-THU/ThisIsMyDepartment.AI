@@ -8,13 +8,37 @@ agent.run implementation later.
 from __future__ import annotations
 
 import asyncio
+import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))  # allow running examples without installing the package
+
+from hamlet.core.models import LiteLLMModel
+from hamlet.core.agents import CodeAgent
+from hamlet.core.monitoring import LogLevel
+
+from dotenv import load_dotenv
+load_dotenv()
+
+def build_agent():
+    model = LiteLLMModel(model_id="gpt-5-mini")
+
+    agent = CodeAgent(
+        model=model,
+        tools=[],
+        verbosity_level=LogLevel.DEBUG)
+
+    return agent
 
 class ChatRequest(BaseModel):
     agentId: str
@@ -59,7 +83,8 @@ class DemoLLMAgent:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Demo LLM Agent", version="0.1.0")
-    agent = DemoLLMAgent()
+    # agent = DemoLLMAgent()
+    agent = build_agent()
 
     app.add_middleware(
         CORSMiddleware,
@@ -68,11 +93,27 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # @app.post("/chat", response_model=ChatResponse)
+    # async def chat(request: ChatRequest) -> ChatResponse:
+    #     session_key = f"{request.agentId}:{request.playerId}"
+    #     try:
+    #         reply = await agent.handle_message(session_key, request.message)
+    #     except Exception as exc:  # pragma: no cover - placeholder error handling
+    #         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    #     history = request.history or []
+    #     history = history + [
+    #         {"role": "user", "content": request.message},
+    #         {"role": "assistant", "content": reply},
+    #     ]
+    #     return ChatResponse(reply=reply, history=history)
+    
     @app.post("/chat", response_model=ChatResponse)
     async def chat(request: ChatRequest) -> ChatResponse:
         session_key = f"{request.agentId}:{request.playerId}"
         try:
-            reply = await agent.handle_message(session_key, request.message)
+            # reply = await agent.handle_message(session_key, request.message)
+            reply = agent.run(request.message, reset=False)
         except Exception as exc:  # pragma: no cover - placeholder error handling
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
