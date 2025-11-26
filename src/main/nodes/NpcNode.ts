@@ -150,7 +150,7 @@ export class NpcNode extends CharacterNode {
         return this;
     }
     public getSpeed(): number {
-        return 40;
+        return 60;
     }
     public getAcceleration(): number {
         return this.acceleration;

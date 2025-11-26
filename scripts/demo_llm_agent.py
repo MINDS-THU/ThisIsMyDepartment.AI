@@ -23,8 +23,7 @@ SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))  # allow running examples without installing the package
 
-from hamlet.core.models import LiteLLMModel
-from hamlet.core.agents import CodeAgent
+from hamlet import LiteLLMModel, CodeAgent
 from hamlet.core.monitoring import LogLevel
 
 from dotenv import load_dotenv

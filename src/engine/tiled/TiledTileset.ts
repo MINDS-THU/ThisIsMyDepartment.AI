@@ -1,4 +1,4 @@
-import { TiledTilesetJSON } from "*.tiledmap.json";
+import { TiledTileJSON, TiledTilesetJSON } from "*.tiledmap.json";
 import { Color } from "../color/Color";
 import { RGBAColor } from "../color/RGBAColor";
 import { RGBColor } from "../color/RGBColor";
@@ -7,6 +7,9 @@ import { loadImage } from "../util/graphics";
 
 export class TiledTileset {
     private image: HTMLImageElement | null = null;
+    private tilesById?: Map<number, TiledTileJSON>;
+    private tileImages: Map<number, HTMLImageElement | null> = new Map();
+    private tileImagePromises: Map<number, Promise<HTMLImageElement | null>> = new Map();
 
     private constructor(
         private readonly json: TiledTilesetJSON,
@@ -40,16 +43,62 @@ export class TiledTileset {
     }
 
     @cacheResult
-    public async loadImage(): Promise<HTMLImageElement> {
+    public async loadImage(): Promise<HTMLImageElement | null> {
+        if (this.json.image == null) {
+            return null;
+        }
         this.image = await loadImage(new URL(this.json.image, this.baseURL));
         return this.image;
     }
 
     public getImage(): HTMLImageElement | null {
+        if (this.json.image == null) {
+            return null;
+        }
         if (this.image === null) {
             this.loadImage();
         }
         return this.image;
+    }
+
+    private getTilesMap(): Map<number, TiledTileJSON> {
+        if (this.tilesById == null) {
+            this.tilesById = new Map();
+            for (const tile of this.json.tiles ?? []) {
+                this.tilesById.set(tile.id, tile);
+            }
+        }
+        return this.tilesById;
+    }
+
+    public getTile(localTileId: number): TiledTileJSON | null {
+        return this.getTilesMap().get(localTileId) ?? null;
+    }
+
+    private async loadTileImage(localTileId: number): Promise<HTMLImageElement | null> {
+        const tile = this.getTile(localTileId);
+        if (tile == null || tile.image == null) {
+            return null;
+        }
+        const promise = loadImage(new URL(tile.image, this.baseURL)).catch(() => null);
+        this.tileImagePromises.set(localTileId, promise);
+        const image = await promise;
+        this.tileImages.set(localTileId, image);
+        return image;
+    }
+
+    public getTileImage(localTileId: number): HTMLImageElement | null {
+        if (this.json.image != null) {
+            return this.getImage();
+        }
+        const cached = this.tileImages.get(localTileId);
+        if (cached != null) {
+            return cached;
+        }
+        if (!this.tileImagePromises.has(localTileId)) {
+            this.loadTileImage(localTileId);
+        }
+        return null;
     }
 
     public getImageURL(): string {

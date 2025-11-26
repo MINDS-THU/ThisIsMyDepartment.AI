@@ -5,11 +5,11 @@ const chuanhaoAgent: LLMAgentDefinition = {
     agentId: "chuanhao-bot",
     displayName: "李传浩老师",
     spriteIndex: 4,
-    position: { x: 400, y: 200 },
-    agentUrl: "http://127.0.0.1:5051/chat",
+    position: { x: 548.67, y: 1085.67 },
+    agentUrl: "http://127.0.0.1:5050/chat",
     caption: "按E键聊天",
     systemPrompt: "You are DemoBot, a cheerful virtual guide for a research factory simulation.",
-    walkArea: { x: 400, y: 200, width: 100, height: 100 }
+    walkArea: { x: 548.67, y: 1085.67, width: 50, height: 50 }
 };
 
 export default chuanhaoAgent;

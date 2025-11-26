@@ -3,6 +3,10 @@ import { Direction } from "../../engine/geom/Direction";
 import { InteractiveNode } from "./InteractiveNode";
 import { SceneNodeArgs } from "../../engine/scene/SceneNode";
 import { asset } from "../../engine/assets/Assets";
+import { TextNode } from "../../engine/scene/TextNode";
+import { BitmapFont } from "../../engine/assets/BitmapFont";
+import { Layer, STANDARD_FONT } from "../constants";
+import { Gather } from "../Gather";
 
 export interface IFrameNodeArgs extends SceneNodeArgs {
     onUpdate?: (state: boolean) => boolean | undefined;
@@ -11,18 +15,20 @@ export interface IFrameNodeArgs extends SceneNodeArgs {
 export class IFrameNode extends InteractiveNode {
     @asset("sprites/empty.aseprite.json")
     private static readonly noSprite: Aseprite;
+    @asset(STANDARD_FONT)
+    private static readonly labelFont: BitmapFont;
 
     private inIFrame: boolean = false;
     public pasteInput?: HTMLInputElement;
     public url: string;
     private onUpdate?: (state: boolean) => boolean | undefined;
-    private toStartString: string;
     private range: number;
     private needpasting: boolean;
     private backdrop?: HTMLDivElement;
     private closeBtn?: HTMLDivElement;
     private videos?: HTMLElement;
     private iFrame?: HTMLIFrameElement;
+    private readonly labelNode?: TextNode<Gather>;
 
     public constructor({ onUpdate, ...args }: IFrameNodeArgs) {
         super({
@@ -33,9 +39,24 @@ export class IFrameNode extends InteractiveNode {
         }, "按E键进行互动");
         this.onUpdate = onUpdate;
         this.url = args.tiledObject?.getOptionalProperty("url", "string")?.getValue() ?? "";
-        this.toStartString = args.tiledObject?.getOptionalProperty("startstring", "string")?.getValue() ?? "进行互动";
         this.range = args.tiledObject?.getOptionalProperty("range", "int")?.getValue() ?? 30;
         this.needpasting = args.tiledObject?.getOptionalProperty("needpasting", "bool")?.getValue() ?? false;
+
+        const labelText = args.tiledObject?.getOptionalProperty("label", "string")?.getValue()
+            ?? args.tiledObject?.getName()
+            ?? "";
+        if (labelText.trim().length > 0) {
+            this.labelNode = new TextNode<Gather>({
+                font: IFrameNode.labelFont,
+                color: "white",
+                outlineColor: "black",
+                fallbackFont: "16px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif",
+                fallbackLineHeight: 22,
+                y: -30,
+                layer: Layer.OVERLAY
+            }).appendTo(this);
+            this.labelNode.setText(labelText.trim());
+        }
     }
 
     /** @inheritdoc */
@@ -52,8 +73,7 @@ export class IFrameNode extends InteractiveNode {
 
     public update(dt: number, time: number): void {
         const keyLabel = this.getPrimaryActionKeyLabel();
-        const actionText = this.toStartString.trim().length > 0 ? this.toStartString : "进行互动";
-        this.caption = `按${keyLabel}键打开${actionText}`;
+        this.caption = `按${keyLabel}键打开`;
         super.update(dt, time);
     }
 

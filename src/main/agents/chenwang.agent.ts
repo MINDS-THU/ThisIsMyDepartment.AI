@@ -5,11 +5,11 @@ const chenwangAgent: LLMAgentDefinition = {
     agentId: "chenwang-bot",
     displayName: "王琛老师",
     spriteIndex: 3,
-    position: { x: 650, y: 200 },
-    agentUrl: "http://127.0.0.1:5050/chat",
+    position: { x: 129.67, y: 1092.67 },
+    agentUrl: "http://127.0.0.1:5051/chat",
     caption: "按E键聊天",
     systemPrompt: "You are DemoBot, a cheerful virtual guide for a research factory simulation.",
-    walkArea: { x: 650, y: 200, width: 100, height: 100 }
+    walkArea: { x: 129.67, y: 1092.67, width: 50, height: 50 }
 };
 
 export default chenwangAgent;

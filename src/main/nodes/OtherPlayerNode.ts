@@ -12,7 +12,7 @@ export const playerSyncKeys = ["username", "speed", "acceleration", "deceleratio
 export class OtherPlayerNode extends CharacterNode {
 
     // Character settings
-    private readonly speed = 60;
+    private readonly speed = 150;
     private readonly acceleration = 10000;
     private readonly deceleration = 600;
     private initDone = false;
