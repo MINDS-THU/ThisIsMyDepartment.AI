@@ -26,7 +26,7 @@
         }, 
         {
          "compression":"zlib",
-         "data":"eJztmVtsFUUYx6dIk8r9Igg9XAM+qLtHFDThweADSU8fQRTBy5Mx0YcWxaBFEUgQH7wS44s3hJAAUUALCUQF7w9qWyj4QqLFekEuLdALGNsC\/iY7k50z3dmzx3OOBuk\/+WVnd76Z+b6d6bdzpkKURg2+EI1+UK7zsutq1X0b9e1+9jNTw9JCDE+H96Z9KTRxnhCVkJoXPvuR8X5SY75g+biK+23UPQyPwFY\/eLZ9VrbdJGKYbMTRh91FKw6zTWumMG7E\/5vgZhXHNmMs6eMbVhwzUkLs4\/mTsAL2QjM2e604tJbMF2Lp\/Og6s83g6uIhtc+IQ\/pYbr3D2lRw1XFIyTi+ccTxKDE85ojDbNNQxVqGJjgIh6AZDsMRaOGdl0X4XMPzWliWCWwkURrrWNNb\/AAdh9TXfn+04uqk2vH1DJyFc9ABndAF3VVBDDPhRfx8CV6GV+BVeA02qDjLqqP9nW6NV6PmY48fYMbxg98frbg6qRH4MRJGwWgYA2PhOhiXCWJ4n+sHsAN2wi74ED6CemWj5+MXfPpV+fW7Uf5NXT9O9Y+1GPNxC+PPglvhNpgNc+B2uMPwsRGa4CAcgmY4DEeUjZ6Pc\/jUofzqMspax7j\/2Qtzs4yzGPOh17YLHUcSu1bH34ipdnw+44V5t8MrznzotR1Fi\/Gutb9RNmYuyKUZjnxV6HzMrHaj\/8aln7nymrRbHrH2bbnybqHzcR8+LoGlcD88AA\/CQ5nseHLlNVfedWkdfqwv4nzUMf5KeAaehVXwHKyGNbBWxZMrryWNo6ZE+epNxn8L3oZ34F3YCO\/BJtis1n6uvOb6ftiKy7uFzMcn+PAp7IcD8Bl8Dl\/Al\/CVmo+7uS6ChZmwfA\/cC4uVTRJdH\/F9b47Y7+ajYzHtdX439+CnuJ527DOSSn4bj1ayJ\/FC5P3jXJ9Q6PJyL7vdU\/A0rDDKJ70gl39bIcR38D00QCM0VYR7b3MP3sO113e3SaIF5ULcwNqq90Lk\/WquaxS6LG3Nds\/zbD2s84KyfPanirWD8TuhC7rhPFxw+DSE3wND0\/m1sVVXntsmyjaqXT59XUk6xTs+DW3p7HKhtv+2evCjF\/rS2eVCbQd0dSru+3Elqd3K0bbsujjbJPWlVFwOtuty5ev\/az4f0NUpfXbR6oXnNfJ8Ru4tj8MfcELltKR2cWrxgjPpJH0ltdP7XXl2cdYLz2s6veC8phvOw4U87PTe06W2Eo3Zm\/D7Ie364CJcgsuyHfv3MhgE18Bgv\/9Zrq0eL3lf+Yx5bcLfRNJuCAyFYTAcRsBIGAWjYYzvPsvVqvCT95XPmFG\/MaOk7XRful+7f\/ss19Z4NeYEmAiVkIJJMBmmwFSYlofddDV3GyLO6812Unr96We63u5fzvFfc8VdcZRiPqTtRsf\/HUzp9VfoutJ9lWJd7UgQh15XSeY4SV\/FXlcD+ud6\/c7\/2oP8NLcq+vnuEsTxNwAtet8=",
+         "data":"eJztmVtsFUUYx6dKk8r95oUeUAn4oO4eUdSEB4MPJD19VBEFL0\/GRB9aEYNWRTBBfPBKiC94QY2JGEEFjBDv1we1LRR8IcFivYHQAr2AoS3qb7Iz2TnTnT1zPOdgiv0nv+zszjcz37cz\/XbOVIjKqDkUoiWMyk1Bfl2juu+kvivMf2ZqbFaIcdn43rSvhKbNF6IWMvPjZ\/sY70c15pOWjyu430jdXXA3vBlGz96ak283nRhmGHEMYnfKisNs05ErjUvx\/zK4XMWx0RhL+viCFcesjBA7eP4ALIft0IbNdisOrcULhFiyILnObDOqvnxI7TDikD5WW++wMRNddRxSMo5vHHHcQwz3OuIw2zTXsZahFXbCLmiD3bAH2nnnVQk+N\/C8Ee7LRTaSJE1xrOk3wggdh9TX4VC00uqkuvD1CByFY9ANPdALfXVRDLPhKfx8Gp6BZ+E5eB7Wqjir6pP9nWmN16Dm4\/0wwozjh3AoWml1UuPxYwJMhEkwGabAVDg3F8XwNtdNsBnegXfhPdgCW5WNno+f8ekX5ddvRvlXdf0wMzTWcszHFYw\/B66Eq2AuXA3XwLWGjy3QCjthF7TBbtijbPR8HMOnbuVXr1HW2s\/9T0Gcm2Wc5ZgPvbZd6Dh87DocfyOmuvD5SBDn3e6gPPOh13YS7ca71v4m2Zi5oJBmOfJVqfMxu96N\/huXfhbKa9JuWcLat+XKu6XOx634uBiWwG1wO9wBd+by4ymU11x516XV+LGmjPPRxPgPwyPwKKyAx2AlrILHVTyF8ppvHA0VylfrGf9FeAlehldgA7wKr8Hrau0Xymuu74ettLxbynx8hA8fwyfwKXwGn8MX8CV8pebjJq4L4cZcXL4ZFsEtysZH5yd839sS9rvFaH9Ke53fzT34Ia6HHfsMX8lv495a9iRBjLxfyvV+hS4vC\/LbPQgPwXKj\/EcQ5fJva4T4Dr6HZmiB1pp4723uwfu5DoTuNj66oVqIS1hbW4MYeb+S6yqFLktbs90TPFsDq4OoLJ\/9qWLtZvwe6IU+OA4nHD6N5vfAmGxxbWw1VRe2SbJNaldMX8NJh3jHh6Ezm18u1fZ0qx8\/BmAwm18u1XZE\/0+lfT+Gk7qsHG3Lrkuz9amvpNJysF1XKF+fqfk8SR947sNGNHylzy46gvi8Rp7PyL3l73AADqqc5muXpvYgOpP26cvXTu935dnF0SA+r+kJovOaPjgOJ4qw03tPlzorNOaA5\/dD2g3CKfgL\/pbt2L9XwVlwNowKh57l2uoP\/PsqZsxzPH8TSbvRMAbGwjgYDxNgIkyCyaH7LFerJvTvq5gxk35jJknb6b50v3b\/9lmurfPUmBfANKiFDEyHGXAhXAQXF2E3U83d2oTzerOdlF5\/+pmut\/uXc3xynrg+jUrMh7Td4Pi\/gym9\/kpdV7qvSqyrzR5x6HXlM8c+fZV7XY3o32vddf+1B8VpXl3y820ViOMfcf573g==",
          "encoding":"base64",
          "height":40,
          "id":14,
@@ -260,7 +260,7 @@
                         {
                          "name":"url",
                          "type":"string",
-                         "value":"http:\/\/127.0.0.1:7860\/"
+                         "value":"http:\/\/166.111.59.11:58581\/"
                         }],
                  "rotation":0,
                  "type":"iframe",
@@ -551,7 +551,7 @@
                         {
                          "name":"url",
                          "type":"string",
-                         "value":"https:\/\/dmt.kaoshixing.com\/"
+                         "value":"https:\/\/pro.yuketang.cn\/ai-workspace\/ai-co-build-display\/237\/self-learning\/scheme"
                         }],
                  "rotation":0,
                  "type":"iframe",
@@ -587,6 +587,62 @@
                  "width":0,
                  "x":1024,
                  "y":375.5
+                }, 
+                {
+                 "height":0,
+                 "id":662,
+                 "name":"\u5b9e\u9a8c\u8bbe\u8ba1",
+                 "point":true,
+                 "properties":[
+                        {
+                         "name":"needpasting",
+                         "type":"bool",
+                         "value":true
+                        }, 
+                        {
+                         "name":"startstring",
+                         "type":"string",
+                         "value":"\u5b9e\u9a8c\u8bbe\u8ba1"
+                        }, 
+                        {
+                         "name":"url",
+                         "type":"string",
+                         "value":"http:\/\/166.111.59.11:58586\/"
+                        }],
+                 "rotation":0,
+                 "type":"iframe",
+                 "visible":true,
+                 "width":0,
+                 "x":560.5,
+                 "y":694.5
+                }, 
+                {
+                 "height":0,
+                 "id":663,
+                 "name":"\u8fd0\u7b79\u8da3\u9898\u64c2\u53f0",
+                 "point":true,
+                 "properties":[
+                        {
+                         "name":"needpasting",
+                         "type":"bool",
+                         "value":true
+                        }, 
+                        {
+                         "name":"startstring",
+                         "type":"string",
+                         "value":"\u8fd0\u7b79\u8da3\u9898\u64c2\u53f0"
+                        }, 
+                        {
+                         "name":"url",
+                         "type":"string",
+                         "value":"http:\/\/166.111.59.11:58581\/"
+                        }],
+                 "rotation":0,
+                 "type":"iframe",
+                 "visible":true,
+                 "width":0,
+                 "x":1023.83333333333,
+                 "y":762.333333333333
                 }],
          "opacity":1,
          "properties":[
@@ -603,6 +659,7 @@
         {
          "draworder":"topdown",
          "id":9,
+         "locked":true,
          "name":"collisions",
          "objects":[
                 {
@@ -2019,7 +2076,7 @@
                 }],
          "opacity":1,
          "type":"objectgroup",
-         "visible":true,
+         "visible":false,
          "x":0,
          "y":0
         }, 
@@ -2268,7 +2325,7 @@
          "y":0
         }],
  "nextlayerid":21,
- "nextobjectid":662,
+ "nextobjectid":664,
  "orientation":"orthogonal",
  "renderorder":"right-down",
  "tiledversion":"1.11.2",
@@ -2659,6 +2716,29 @@
                  "imagewidth":64
                 }],
          "tilewidth":64
+        }, 
+        {
+         "columns":0,
+         "firstgid":18870,
+         "grid":
+            {
+             "height":1,
+             "orientation":"orthogonal",
+             "width":1
+            },
+         "margin":0,
+         "name":"LeiTai",
+         "spacing":0,
+         "tilecount":1,
+         "tileheight":215,
+         "tiles":[
+                {
+                 "id":0,
+                 "image":"LeiTai.png",
+                 "imageheight":215,
+                 "imagewidth":192
+                }],
+         "tilewidth":192
         }],
  "tilewidth":32,
  "type":"map",
