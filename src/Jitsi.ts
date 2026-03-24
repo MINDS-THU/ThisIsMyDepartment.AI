@@ -31,6 +31,7 @@ export default class JitsiInstance {
     private audioEnabled = false;
     private videoEnabled = false;
     private localTrackCreationPromise?: Promise<void>;
+    private initialized = false;
 
     private connectionOptions: JitsiConferenceOptions = {
         ...getJitsiConnectionOptions()
@@ -43,21 +44,25 @@ export default class JitsiInstance {
         }
     };
 
+    private ensureLibraryInitialized(): void {
+        if (this.initialized) {
+            return;
+        }
+
+        this.JitsiMeetJS.setLogLevel(this.JitsiMeetJS.logLevels.ERROR);
+        this.JitsiMeetJS.init({
+            disableAudioLevels: true
+        });
+        this.initialized = true;
+    }
+
 
     public async create(): Promise<JitsiConference> {
         return new Promise((resolve, reject) => {
-
-            this.JitsiMeetJS.setLogLevel(this.JitsiMeetJS.logLevels.ERROR);
+            this.ensureLibraryInitialized();
 
             window.addEventListener("beforeunload", this.unload.bind(this));
             window.addEventListener("unload", this.unload.bind(this));
-
-            // JitsiMeetJS.setLogLevel(JitsiMeetJS.logLevels.ERROR);
-            const initOptions = {
-                disableAudioLevels: true
-            };
-
-            this.JitsiMeetJS.init(initOptions);
 
             this.connection = new this.JitsiMeetJS.JitsiConnection(undefined, undefined, this.connectionOptions);
 
@@ -315,6 +320,7 @@ export default class JitsiInstance {
             if (ThisIsMyDepartmentApp.instance.isInGameScene() && id !== this.room.getName()) {
                 ThisIsMyDepartmentApp.instance.showNotification(this.room.getParticipantById(id).getDisplayName() + " joined");
             }
+            ThisIsMyDepartmentApp.instance.rebroadcastLocalPresentationState();
         });
         this.room.on(JitsiConferenceEvents.MESSAGE_RECEIVED, this.handleMessageReceived.bind(this));
         this.room.on(JitsiConferenceEvents.PRIVATE_MESSAGE_RECEIVED, this.handleMessageReceived.bind(this));
@@ -581,6 +587,12 @@ export default class JitsiInstance {
     }
 
     public changeAudioOutput(deviceId: string): void {
+        const canSelectAudioOutput = typeof HTMLMediaElement !== "undefined"
+            && "setSinkId" in HTMLMediaElement.prototype
+            && typeof this.JitsiMeetJS.mediaDevices?.setAudioOutputDevice === "function";
+        if (!canSelectAudioOutput) {
+            throw new Error("This browser does not support selecting speaker output devices.");
+        }
         setStoredMediaDevicePreference(localStorage, "audioOutput", deviceId);
         this.JitsiMeetJS.mediaDevices.setAudioOutputDevice(deviceId);
     }
@@ -638,6 +650,8 @@ export default class JitsiInstance {
     }
 
     private async ensureLocalTracks(): Promise<void> {
+        this.ensureLibraryInitialized();
+
         if (this.localTracks.length > 0) {
             return;
         }

@@ -2,6 +2,7 @@ import { Direction } from "../../engine/geom/Direction";
 import { SceneNode } from "../../engine/scene/SceneNode";
 import { Signal } from "../../engine/util/Signal";
 import { Layer } from "../constants";
+import { AppLanguage, DEFAULT_LANGUAGE, getUiFontStack, translate } from "../i18n";
 import type { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
 
 export interface ConversationEntry {
@@ -31,6 +32,7 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
     private submitLabel = "Send";
     private statusText = "Enter to send. Shift+Enter for newline.";
     private composerDisabled = false;
+    private language: AppLanguage = DEFAULT_LANGUAGE;
     private domRoot?: HTMLDivElement;
     private headerTitle?: HTMLDivElement;
     private headerMeta?: HTMLDivElement;
@@ -38,6 +40,7 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
     private composerInput?: HTMLTextAreaElement;
     private composerSubmit?: HTMLButtonElement;
     private statusElement?: HTMLDivElement;
+    private closeButton?: HTMLButtonElement;
     private viewportLayout?: { left: number; top: number; width: number; height: number };
 
     public constructor() {
@@ -125,6 +128,14 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
         this.renderComposerState();
     }
 
+    public setLanguage(language: AppLanguage): void {
+        this.language = language;
+        if (this.domRoot) {
+            this.domRoot.style.fontFamily = getUiFontStack(this.language);
+        }
+        this.renderConversation();
+    }
+
     protected activate(): void {
         super.activate();
         this.ensureDom();
@@ -158,7 +169,7 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
             root.style.boxShadow = "0 20px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05)";
             root.style.setProperty("backdrop-filter", "blur(8px)");
             root.style.color = "#f4f7fb";
-            root.style.fontFamily = "'Avenir Next', 'Helvetica Neue', sans-serif";
+            root.style.fontFamily = getUiFontStack(this.language);
 
             const shell = document.createElement("div");
             shell.style.display = "flex";
@@ -200,15 +211,16 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
 
             const closeButton = document.createElement("button");
             closeButton.type = "button";
-            closeButton.textContent = "Close";
+            closeButton.textContent = this.t("conversation.close");
             closeButton.style.border = "none";
             closeButton.style.borderRadius = "999px";
             closeButton.style.padding = "8px 12px";
             closeButton.style.background = "rgba(255, 255, 255, 0.12)";
             closeButton.style.color = "#ffffff";
-            closeButton.style.font = "600 12px 'Avenir Next', 'Helvetica Neue', sans-serif";
+            closeButton.style.font = `600 12px ${getUiFontStack(this.language)}`;
             closeButton.style.cursor = "pointer";
             closeButton.addEventListener("click", () => this.onCloseRequested.emit(undefined));
+            this.closeButton = closeButton;
             header.appendChild(closeButton);
 
             this.historyElement = document.createElement("div");
@@ -252,7 +264,7 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
             this.composerInput.style.border = "1px solid rgba(139, 192, 255, 0.24)";
             this.composerInput.style.background = "rgba(255, 255, 255, 0.07)";
             this.composerInput.style.color = "#f7fbff";
-            this.composerInput.style.font = "500 14px/1.5 'Avenir Next', 'Helvetica Neue', sans-serif";
+            this.composerInput.style.font = `500 14px/1.5 ${getUiFontStack(this.language)}`;
             this.composerInput.style.outline = "none";
             this.composerInput.style.boxSizing = "border-box";
             this.composerInput.addEventListener("input", () => this.resizeComposer());
@@ -293,7 +305,7 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
             this.composerSubmit.style.padding = "10px 18px";
             this.composerSubmit.style.background = "linear-gradient(135deg, #4db8ff 0%, #ff9f67 100%)";
             this.composerSubmit.style.color = "#08131d";
-            this.composerSubmit.style.font = "700 12px 'Avenir Next', 'Helvetica Neue', sans-serif";
+            this.composerSubmit.style.font = `700 12px ${getUiFontStack(this.language)}`;
             this.composerSubmit.style.letterSpacing = "0.04em";
             this.composerSubmit.style.cursor = "pointer";
             footer.appendChild(this.composerSubmit);
@@ -316,13 +328,13 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
         const historyElement = this.historyElement;
         const shouldStickToBottom = this.isScrolledToBottom();
         this.domRoot.style.display = this.isHidden() ? "none" : "block";
-        this.headerTitle.textContent = this.partnerLabel || "Conversation";
+        this.headerTitle.textContent = this.partnerLabel || this.t("conversation.title.default");
         this.headerMeta.textContent = this.modeLabel;
         historyElement.innerHTML = "";
 
         if (this.visibleEntries.length === 0) {
             const emptyState = document.createElement("div");
-            emptyState.textContent = "No messages yet. Start the conversation here.";
+            emptyState.textContent = this.t("conversation.empty");
             emptyState.style.padding = "20px 18px";
             emptyState.style.borderRadius = "18px";
             emptyState.style.background = "rgba(255, 255, 255, 0.05)";
@@ -341,7 +353,7 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
             message.style.gap = "4px";
 
             const meta = document.createElement("div");
-            meta.textContent = `${fromSelf ? "You" : entry.senderName} • ${this.formatTime(entry.timestamp)}`;
+            meta.textContent = `${fromSelf ? this.t("conversation.sender.you") : entry.senderName} • ${this.formatTime(entry.timestamp)}`;
             meta.style.fontSize = "11px";
             meta.style.letterSpacing = "0.03em";
             meta.style.color = fromSelf ? "rgba(173, 226, 255, 0.82)" : "rgba(244, 217, 197, 0.82)";
@@ -376,6 +388,10 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
         if (!this.composerInput || !this.composerSubmit || !this.statusElement) {
             return;
         }
+        if (this.closeButton) {
+            this.closeButton.textContent = this.t("conversation.close");
+            this.closeButton.style.font = `600 12px ${getUiFontStack(this.language)}`;
+        }
         this.composerInput.placeholder = this.placeholder;
         this.composerInput.disabled = this.composerDisabled;
         this.composerSubmit.disabled = this.composerDisabled;
@@ -384,6 +400,10 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
         this.composerSubmit.style.opacity = this.composerDisabled ? "0.6" : "1";
         this.composerSubmit.style.cursor = this.composerDisabled ? "default" : "pointer";
         this.composerInput.style.opacity = this.composerDisabled ? "0.72" : "1";
+    }
+
+    private t(key: string, params?: Record<string, string | number>): string {
+        return translate(this.language, key, params);
     }
 
     private handleSubmit(): void {

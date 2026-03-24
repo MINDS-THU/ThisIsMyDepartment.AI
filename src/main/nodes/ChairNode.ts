@@ -21,6 +21,8 @@ export class ChairNode extends InteractiveNode {
             tag: "off",
             ...args
         }, "按E键坐下");
+        this.setInteractionActionLabel("Sit down on");
+        this.setInteractionLabel(args.tiledObject?.getName()?.trim() || "Seat");
     }
 
     protected getRange(): number {

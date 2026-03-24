@@ -51,3 +51,9 @@ export const saveCharacterSystemPrompt = async (characterSystemPrompt: string): 
         characterSystemPrompt
     });
 };
+
+export const saveProfilePreferences = async (preferences: Record<string, unknown>): Promise<ProfileResponse | null> => {
+    return saveProfileUpdate({
+        preferences
+    });
+};

@@ -18,6 +18,7 @@ export class PresentationNode extends InteractiveNode {
     private readonly presentationBoardId?: number;
 
     private presents: boolean = false;
+    private presenting = false;
     private presentationBoard?: PresentationBoardNode;
 
     public constructor({ onUpdate, ...args }: PresentationNodeArgs) {
@@ -27,6 +28,8 @@ export class PresentationNode extends InteractiveNode {
             tag: "off",
             ...args
         }, "按E键开始演讲");
+        this.setInteractionActionLabel("Start");
+        this.setInteractionLabel(args.tiledObject?.getName()?.trim() || "Presentation");
         this.presentationBoardId = args.tiledObject?.getOptionalProperty("forPresentationboard", "int")?.getValue();
     }
 
@@ -35,10 +38,22 @@ export class PresentationNode extends InteractiveNode {
         return 10;
     }
 
+    private getPresentationBoard(): PresentationBoardNode | undefined {
+        if (!this.presentationBoard) {
+            this.presentationBoard = this.getScene()?.rootNode
+                .getDescendantsByType<PresentationBoardNode>(PresentationBoardNode)
+                .find(node => node.boardId === this.presentationBoardId);
+        }
+        return this.presentationBoard;
+    }
+
     public update(dt: number, time: number): void {
+        this.presentationBoard = this.getPresentationBoard();
         if (!this.presents) {
             const keyLabel = this.getPrimaryActionKeyLabel();
-            this.caption = `按${keyLabel}键开始演讲`;
+            const game = this.getGame() as ThisIsMyDepartmentApp;
+            const action = game.isPresentationSessionActive(this.presentationBoard?.boardId) ? "加入演示" : "开始演讲";
+            this.caption = `按${keyLabel}键${action}`;
         } else {
             this.caption = "";
         }
@@ -51,15 +66,29 @@ export class PresentationNode extends InteractiveNode {
             player?.setX(this.x);
             player?.setY(this.y);
             player?.setPreTag(PreCharacterTags.FRONT);
-            this.presentationBoard = this.getScene()?.rootNode.getDescendantsByType<PresentationBoardNode>(PresentationBoardNode).find(n => n.boardId === this.presentationBoardId);
+            this.presentationBoard = this.getPresentationBoard();
             if (this.presentationBoard) {
-                this.getGame().sendCommand("presentationUpdate", { presentationBoardId: this.presentationBoard.boardId, slide: this.presentationBoard.slideIndex });
                 this.presents = true;
+                const game = this.getGame() as ThisIsMyDepartmentApp;
+                this.presenting = !game.isPresentationSessionActive(this.presentationBoard.boardId);
                 const input = this.getScene()!.game.input;
                 input.onButtonDown.connect(this.handleButtonPress, this);
-                this.getScene()?.camera.focus(this.presentationBoard).then((successful) => {
+                this.getScene()?.camera.focus(this.presentationBoard, { duration: 0, follow: true }).then((successful) => {
                     if (successful) {
-                        this.presentationBoard?.startPresentation(0, true);
+                        if (this.presenting) {
+                            (this.getGame() as ThisIsMyDepartmentApp).beginLocalPresentation(
+                                this.presentationBoard?.boardId ?? 0,
+                                this.presentationBoard?.slideIndex ?? 0
+                            );
+                            this.getGame().sendRealtimeCommand("presentationUpdate", { presentationBoardId: this.presentationBoard?.boardId, slide: this.presentationBoard?.slideIndex ?? 0 });
+                            this.presentationBoard?.startPresentation(0, true);
+                            (this.getGame() as ThisIsMyDepartmentApp).openPresentationSessionOverlay();
+                        } else {
+                            const board = this.presentationBoard;
+                            const activeSlide = game.getPresentationSessionSlide(board?.boardId) ?? board?.slideIndex ?? 0;
+                            board?.startPresentation(activeSlide, false);
+                            board?.setSlide(activeSlide);
+                        }
                         if (player != null) {
                             player.startPresentation();
                         }
@@ -71,9 +100,9 @@ export class PresentationNode extends InteractiveNode {
     }
 
     private handleButtonPress(ev: ControllerEvent): void {
-        if (ev.isPlayerMoveRight) {
+        if (this.presenting && ev.isPlayerMoveRight) {
             this.nextSlide();
-        } else if (ev.isPlayerMoveLeft) {
+        } else if (this.presenting && ev.isPlayerMoveLeft) {
             this.previousSlide();
         } else if (ev.isAbort) {
             const input = this.getScene()!.game.input;
@@ -84,15 +113,22 @@ export class PresentationNode extends InteractiveNode {
 
     private leavePresentation(): void {
         this.presents = false;
-        this.presentationBoard?.endPresentation();
+        if (this.presenting) {
+            this.presentationBoard?.endPresentation();
+        }
         const player = this.getPlayer();
-        if (this.presentationBoard) {
-            this.getGame().sendCommand("presentationUpdate", { presentationBoardId: this.presentationBoard.boardId, slide: -1 });
+        if (this.presenting && this.presentationBoard) {
+            (this.getGame() as ThisIsMyDepartmentApp).endLocalPresentation(this.presentationBoard.boardId ?? 0);
+            this.getGame().sendRealtimeCommand("presentationUpdate", { presentationBoardId: this.presentationBoard.boardId, slide: -1 });
         }
         if (player != null) {
             player.endPresentation();
-            this.getScene()?.camera.focus(player, { follow: true });
+            this.getScene()?.camera.focus(player, { duration: 0, follow: true });
         }
+        if (this.presenting) {
+            (this.getGame() as ThisIsMyDepartmentApp).closePresentationSessionOverlay();
+        }
+        this.presenting = false;
         (this.getGame() as ThisIsMyDepartmentApp).turnOnAllLights();
     }
 

@@ -4,7 +4,7 @@ import { TiledMap } from "../tiled/TiledMap";
 import { TiledTileLayer } from "../tiled/TiledTileLayer";
 import { TiledTileset } from "../tiled/TiledTileset";
 import { createCanvas, getRenderingContext } from "../util/graphics";
-import { SceneNode, SceneNodeArgs } from "./SceneNode";
+import { SceneNode, SceneNodeArgs, SceneNodeAspect } from "./SceneNode";
 
 type TilesetEntry = {
     tileset: TiledTileset;
@@ -23,6 +23,7 @@ export interface TiledMapLayerNodeArgs extends SceneNodeArgs {
 export class TiledMapLayerNode<T extends Game> extends SceneNode<T> {
     private map: TiledMap;
     private name: string;
+    private retryScheduled = false;
 
     /**
      * Creates a new scene node displaying the given Tiled Map.
@@ -118,10 +119,15 @@ export class TiledMapLayerNode<T extends Game> extends SceneNode<T> {
                     ctx.restore();
                 }
             }
-            if (needsRetry) {
-                return null;
-            }
             this.renderedMap = canvas;
+            if (needsRetry && !this.retryScheduled) {
+                this.retryScheduled = true;
+                window.setTimeout(() => {
+                    this.retryScheduled = false;
+                    this.renderedMap = null;
+                    this.invalidate(SceneNodeAspect.RENDERING);
+                }, 50);
+            }
         }
         return this.renderedMap;
     }

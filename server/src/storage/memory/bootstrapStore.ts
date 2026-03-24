@@ -261,3 +261,16 @@ export const updateCharacterSystemPromptForUser = (userId: string, prompt: strin
     };
     return setProfileRecord(updatedProfile);
 };
+
+export const updatePreferencesForUser = (userId: string, preferences: Record<string, unknown>): UserProfile => {
+    const currentProfile = getProfileByUserId(userId);
+    const updatedProfile: UserProfile = {
+        ...currentProfile,
+        preferences: {
+            ...currentProfile.preferences,
+            ...preferences
+        },
+        updatedAt: now()
+    };
+    return setProfileRecord(updatedProfile);
+};

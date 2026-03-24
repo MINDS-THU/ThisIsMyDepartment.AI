@@ -9,8 +9,8 @@ import { rndItem } from "../../engine/util/random";
 import { TextNode } from "../../engine/scene/TextNode";
 import { BitmapFont } from "../../engine/assets/BitmapFont";
 import { STANDARD_FONT, Layer } from "../constants";
+import { AppLanguage, DEFAULT_LANGUAGE, getLocalizedText, readLocalizedTiledText } from "../i18n";
 import { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
-import { clamp } from "../../engine/util/math";
 import { PlayerNode } from "./PlayerNode";
 import { Vector2 } from "../../engine/graphics/Vector2";
 
@@ -34,8 +34,10 @@ export class NpcNode extends CharacterNode {
     ])
     public static sprites: Aseprite[];
     protected caption: string;
+    protected interactionLabel: string;
+    protected interactionActionLabel = "Talk to";
+    protected interactionLabelByLanguage: Partial<Record<AppLanguage, string>>;
     protected isBot = true;
-    private captionOpacity = 0;
     private target: CharacterNode | null = null;
 
     // Character settings
@@ -69,11 +71,43 @@ export class NpcNode extends CharacterNode {
         const nameCaption = args?.tiledObject?.getName();
         const initialCaption = tileCaption ?? nameCaption;
         this.caption = initialCaption && initialCaption.trim().length > 0 ? initialCaption : "按E键进行互动";
+        this.interactionLabelByLanguage = readLocalizedTiledText(args?.tiledObject, "label", (nameCaption ?? "").trim() || "NPC");
+        this.interactionLabel = getLocalizedText(DEFAULT_LANGUAGE, this.interactionLabelByLanguage, (nameCaption ?? "").trim() || "NPC");
     }
 
 
     public setCaption(caption: string): void {
         this.caption = caption;
+    }
+
+    public setInteractionLabel(label: string): void {
+        this.interactionLabel = label.trim();
+        this.interactionLabelByLanguage = {
+            en: this.interactionLabel,
+            zh: this.interactionLabel
+        };
+    }
+
+    public setInteractionLabels(labels: Partial<Record<AppLanguage, string>>): void {
+        this.interactionLabelByLanguage = labels;
+        this.interactionLabel = this.getInteractionLabel(this.getActiveLanguage());
+    }
+
+    public setInteractionActionLabel(actionLabel: string): void {
+        this.interactionActionLabel = actionLabel.trim();
+    }
+
+    public getInteractionLabel(language?: AppLanguage): string {
+        const effectiveLanguage = language ?? this.getActiveLanguage();
+        return getLocalizedText(effectiveLanguage, this.interactionLabelByLanguage, this.interactionLabel);
+    }
+
+    protected getActiveLanguage(): AppLanguage {
+        return this.getScene()?.game.getLanguage() ?? DEFAULT_LANGUAGE;
+    }
+
+    public getInteractionActionLabel(): string {
+        return this.interactionActionLabel;
     }
 
     protected getRange(): number {
@@ -93,14 +127,8 @@ export class NpcNode extends CharacterNode {
         }
         this.setTarget(target);
 
-        if (this.target) {
-            this.captionOpacity = clamp(this.captionOpacity + dt * 2, 0, 1);
-        } else {
-            this.captionOpacity = clamp(this.captionOpacity - dt * 8, 0, 1);
-        }
-
-        this.textNode.setOpacity(this.captionOpacity);
-        this.textNode.setText(this.captionOpacity > 0 ? this.caption : "");
+        this.textNode.setOpacity(0);
+        this.textNode.setText("");
 
         if (!this.inConversation && time - this.lastDirectionChange > 3 && (this.getTag() !== PostCharacterTags.DANCE || this.getTimesPlayed(this.getTag()) > 10)) {
             this.lastDirectionChange = time;

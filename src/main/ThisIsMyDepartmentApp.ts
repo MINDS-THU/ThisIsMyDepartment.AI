@@ -10,6 +10,7 @@ import { OnlineService } from "../engine/online/OnlineService";
 import { Camera } from "../engine/scene/Camera";
 import { FadeToBlack } from "../engine/scene/camera/FadeToBlack";
 import { Direction } from "../engine/geom/Direction";
+import { ControllerFamily } from "../engine/input/ControllerFamily";
 import { clamp } from "../engine/util/math";
 import { sleep } from "../engine/util/time";
 import JitsiInstance from "../Jitsi";
@@ -19,11 +20,17 @@ import { Dialog } from "./Dialog";
 import { FxManager } from "./FxManager";
 import { MusicManager } from "./MusicManager";
 import { CharacterNode } from "./nodes/CharacterNode";
+import { ChairNode } from "./nodes/ChairNode";
+import { InteractiveNode } from "./nodes/InteractiveNode";
+import { IFrameNode } from "./nodes/IFrameNode";
 import { LightNode } from "./nodes/LightNode";
+import { NpcNode } from "./nodes/NpcNode";
 // import { NpcNode } from "./nodes/NpcNode";
 import { OtherPlayerNode } from "./nodes/OtherPlayerNode";
 import { PlayerNode } from "./nodes/PlayerNode";
 import { PresentationBoardNode } from "./nodes/PresentationBoardNode";
+import { PresentationNode } from "./nodes/PresentationNode";
+import { SwitchNode } from "./nodes/SwitchNode";
 import { TextInputNode } from "./nodes/TextInputNode";
 import { LLMAgentNode } from "./nodes/LLMAgentNode";
 import { LLMAgentService } from "./services/LLMAgentService";
@@ -32,10 +39,11 @@ import { logActivity } from "./services/activity";
 import { configureBackendLLMBridge } from "./services/backendLLMBridge";
 import { loadBootstrapState } from "./services/bootstrap";
 import { appendConversationMessage, fetchConversation } from "./services/conversations";
-import { saveAvatarProfile, saveCharacterSystemPrompt } from "./services/profile";
+import { saveAvatarProfile, saveCharacterSystemPrompt, saveProfilePreferences } from "./services/profile";
 import { shouldEnableJitsi } from "./runtimeConfig";
 import { ConversationEntry, ConversationWindow, ConversationWindowDisplayOptions } from "./ui/ConversationWindow";
 import { CharacterStatusOverlay } from "./ui/CharacterStatusOverlay";
+import { PresentationSessionOverlay } from "./ui/PresentationSessionOverlay";
 import { SettingsOverlay } from "./ui/SettingsOverlay";
 import { GameScene } from "./scenes/GameScene";
 import { LoadingScene } from "./scenes/LoadingScene";
@@ -43,11 +51,40 @@ import type { LLMAgentDefinition } from "./agents/AgentDefinition";
 import type { ActivityLogType } from "./services/activity";
 import type { BootstrapState, CurrentUser, CurrentUserProfile } from "./types/currentUser";
 import type { DirectMessageEvent, PlayerConversationEvent } from "../engine/online/OnlineService";
+import { AppLanguage, applyLanguageToDocument, DEFAULT_LANGUAGE, getLanguagePreference, normalizeLanguage, storeLanguagePreference, translate } from "./i18n";
+import { MediaType } from "../typings/Jitsi/service/RTC/MediaType";
 
 export enum GameStage {
     NONE = 0,
     START = 1,
     GAME = 2
+}
+
+interface InteractionOption {
+    key: string;
+    prompt: string;
+    title: string;
+    subtitle: string;
+    activate: () => void;
+}
+
+interface LocalPresentationSession {
+    boardId: number;
+    slide: number;
+}
+
+interface RemotePresentationSession {
+    boardId: number;
+    slide: number;
+    presenterId: string;
+}
+
+export interface PresentationAudienceMember {
+    id: string;
+    displayName: string;
+    audioMuted: boolean;
+    videoMuted: boolean;
+    role: string;
 }
 
 export class ThisIsMyDepartmentApp extends Game {
@@ -87,8 +124,18 @@ export class ThisIsMyDepartmentApp extends Game {
 
     private conversationWindow?: ConversationWindow;
     private characterStatusOverlay?: CharacterStatusOverlay;
+    private presentationSessionOverlay?: PresentationSessionOverlay;
     private settingsOverlay?: SettingsOverlay;
     private interactionHint?: HTMLDivElement;
+    private interactionHintText?: HTMLSpanElement;
+    private interactionChooserBackdrop?: HTMLDivElement;
+    private interactionChooserPanel?: HTMLDivElement;
+    private interactionChooserTitle?: HTMLDivElement;
+    private interactionChooserList?: HTMLDivElement;
+    private interactionChooserHelp?: HTMLDivElement;
+    private interactionOptions: InteractionOption[] = [];
+    private interactionSelectionIndex = 0;
+    private interactionOptionSignature = "";
     private activeConversationPartner: string | null = null;
     private conversationLogs = new Map<string, ConversationEntry[]>();
     private conversationPartners = new Map<string, { name: string; type: "agent" | "player" }>();
@@ -97,6 +144,11 @@ export class ThisIsMyDepartmentApp extends Game {
     private currentUser: CurrentUser | null = null;
     private currentUserProfile: CurrentUserProfile | null = null;
     private activityVersion = 0;
+    private currentLanguage: AppLanguage = DEFAULT_LANGUAGE;
+    private localPresentationSession: LocalPresentationSession | null = null;
+    private readonly remotePresentationSessions = new Map<number, RemotePresentationSession>();
+    private roomInitializationPromise: Promise<JitsiConference> | null = null;
+    private roomInitializationError: string | null = null;
 
     private readonly llmService = LLMAgentService.instance;
     private activeLLMConversation: { agent: LLMAgentNode; playerId: string; pending: boolean } | null = null;
@@ -180,20 +232,7 @@ export class ThisIsMyDepartmentApp extends Game {
         // this.spawnNPCs();
         this.setStage(GameStage.GAME);
         if (shouldEnableJitsi()) {
-            this.JitsiInstance = new JitsiInstance();
-            this.JitsiInstance.create().then(room => {
-                this.room = room;
-                this.room.setDisplayName(this.userName);
-                this.recordActivity({
-                    type: "room_joined",
-                    payload: {
-                        roomId: room.getName?.() ?? "unknown-room"
-                    }
-                });
-            }).catch(error => {
-                console.warn("Jitsi initialization failed", error);
-                this.JitsiInstance = undefined;
-            });
+            void this.ensureRealtimeMediaRoom();
         }
         // Assets cannot be loaded in constructor because the LoadingScene
         // is not initialized at constructor time and Assets are loaded in the LoadingScene
@@ -207,10 +246,29 @@ export class ThisIsMyDepartmentApp extends Game {
 
         this.input.onDrag.filter(e => e.isRightStick && !!e.direction && e.direction.getLength() > 0.3).connect(this.getPlayer().handleControllerInput, this.getPlayer());
 
-        this.ensureConversationWindow();
-        this.repositionConversationWindow();
-        this.ensureCharacterStatusOverlay();
-        this.ensureInteractionHint();
+        this.initializeHudUi();
+    }
+
+    private initializeHudUi(): void {
+        try {
+            this.ensureConversationWindow();
+            this.repositionConversationWindow();
+        } catch (error) {
+            console.error("Conversation UI initialization failed", error);
+        }
+
+        try {
+            this.ensureCharacterStatusOverlay();
+        } catch (error) {
+            console.error("Character status UI initialization failed", error);
+        }
+
+        try {
+            this.ensureInteractionHint();
+            this.ensureInteractionChooser();
+        } catch (error) {
+            console.error("Interaction HUD initialization failed", error);
+        }
     }
 
     private applyBootstrapState(bootstrapState: BootstrapState): void {
@@ -269,6 +327,11 @@ export class ThisIsMyDepartmentApp extends Game {
 
     public setCurrentUserProfile(profile: CurrentUserProfile | null | undefined): void {
         this.currentUserProfile = this.cloneCurrentUserProfile(profile ?? null);
+        this.applyLanguage(getLanguagePreference(this.currentUserProfile));
+    }
+
+    public getLanguage(): AppLanguage {
+        return this.currentLanguage;
     }
 
     public openCharacterSystemPromptEditor(): void {
@@ -284,37 +347,139 @@ export class ThisIsMyDepartmentApp extends Game {
     }
 
     public toggleLocalAudio(): boolean {
-        if (!this.JitsiInstance) {
-            this.showNotification("Audio controls are not ready yet.");
-            return false;
-        }
-        const enabled = this.JitsiInstance.toggleLocalAudio();
+        const mediaControls = this.ensureMediaControls();
+        const enabled = mediaControls.toggleLocalAudio();
         this.refreshConversationMediaState();
         this.characterStatusOverlay?.refresh();
         return enabled;
     }
 
     public toggleLocalVideo(): boolean {
-        if (!this.JitsiInstance) {
-            this.showNotification("Camera controls are not ready yet.");
-            return false;
-        }
-        const enabled = this.JitsiInstance.toggleLocalVideo();
+        const mediaControls = this.ensureMediaControls();
+        const enabled = mediaControls.toggleLocalVideo();
         this.refreshConversationMediaState();
         this.characterStatusOverlay?.refresh();
         this.updateConversationMediaLayout();
         return enabled;
     }
 
-    public openSettingsOverlay(initialTab: "media" | "character" | "ai-prompt" = "media"): void {
+    public isPresentationScreenShareActive(): boolean {
+        return !!this.room?.getLocalVideoTrack()?.isScreenSharing?.();
+    }
+
+    public getPresentationMediaUnavailableReason(): string | null {
+        if (!shouldEnableJitsi()) {
+            const hostname = window.location.hostname.toLowerCase();
+            if (hostname === "127.0.0.1" || hostname === "localhost" || hostname === "0.0.0.0") {
+                return this.t("presentation.controls.errors.localJitsiDisabled");
+            }
+            return this.t("presentation.controls.errors.mediaUnavailable");
+        }
+
+        return this.roomInitializationError;
+    }
+
+    public async togglePresentationScreenShare(): Promise<void> {
+        await this.ensureRealtimeMediaRoom();
+        this.ensureMediaControls().switchVideo();
+    }
+
+    public getPresentationAudience(): PresentationAudienceMember[] {
+        const participants = this.room?.getParticipants() ?? [];
+        return participants
+            .map(participant => ({
+                id: participant.getId(),
+                displayName: participant.getDisplayName() || participant.getId(),
+                audioMuted: participant.isAudioMuted(),
+                videoMuted: participant.isVideoMuted(),
+                role: participant.getRole()
+            }))
+            .sort((left, right) => left.displayName.localeCompare(right.displayName));
+    }
+
+    public canModeratePresentationAudience(): boolean {
+        return this.room?.isModerator() === true;
+    }
+
+    public async mutePresentationAudience(): Promise<number> {
+        await this.ensureRealtimeMediaRoom();
+        if (!this.canModeratePresentationAudience()) {
+            throw new Error(this.t("presentation.controls.errors.moderatorRequired"));
+        }
+
+        const audience = this.getPresentationAudience();
+        audience.forEach(member => {
+            this.room?.muteParticipant(member.id, MediaType.AUDIO);
+        });
+        return audience.length;
+    }
+
+    public requestPresentationAudienceUnmute(): number {
+        const audience = this.getPresentationAudience();
+        this.sendCommand("presentationAudienceUnmuteRequest", {
+            presenterName: this.userName,
+            count: audience.length
+        });
+        return audience.length;
+    }
+
+    public openPresentationSessionOverlay(): void {
+        if (!this.presentationSessionOverlay) {
+            this.presentationSessionOverlay = new PresentationSessionOverlay();
+        }
+        this.presentationSessionOverlay.open(this);
+    }
+
+    public closePresentationSessionOverlay(): void {
+        this.presentationSessionOverlay?.close();
+        this.presentationSessionOverlay = undefined;
+    }
+
+    public async setLocalAudioEnabled(enabled: boolean): Promise<boolean> {
+        const mediaControls = this.ensureMediaControls();
+        if (enabled === mediaControls.isLocalAudioEnabled()) {
+            return enabled;
+        }
+
+        if (enabled) {
+            await this.requestDevicePermission({ audio: true, video: false });
+        }
+
+        mediaControls.setLocalAudioEnabled(enabled);
+        await this.syncConversationMediaState();
+        this.characterStatusOverlay?.refresh();
+        return mediaControls.isLocalAudioEnabled();
+    }
+
+    public async setLocalVideoEnabled(enabled: boolean): Promise<boolean> {
+        const mediaControls = this.ensureMediaControls();
+        if (enabled === mediaControls.isLocalVideoEnabled()) {
+            return enabled;
+        }
+
+        if (enabled) {
+            await this.requestDevicePermission({ audio: false, video: true });
+        }
+
+        mediaControls.setLocalVideoEnabled(enabled);
+        await this.syncConversationMediaState();
+        this.characterStatusOverlay?.refresh();
+        this.updateConversationMediaLayout();
+        return mediaControls.isLocalVideoEnabled();
+    }
+
+    public openSettingsOverlay(initialTab: "media" | "language" | "character" | "ai-prompt" = "media"): void {
         if (!this.settingsOverlay) {
             this.settingsOverlay = new SettingsOverlay();
         }
 
         this.settingsOverlay.open({
             initialTab,
+            initialLanguage: this.currentLanguage,
             initialSpriteIndex: this.currentUserProfile?.avatar?.spriteIndex ?? this.initialPlayerSprite,
             initialPrompt: this.currentUserProfile?.characterSystemPrompt ?? "",
+            initialAudioEnabled: this.isLocalAudioEnabled(),
+            initialVideoEnabled: this.isLocalVideoEnabled(),
             getMediaDevices: async () => {
                 const enumeratedDevices = await this.enumerateMediaDevices();
                 return enumeratedDevices.map((device, index) => ({
@@ -329,21 +494,85 @@ export class ThisIsMyDepartmentApp extends Game {
             onPromptSave: async (prompt: string) => {
                 await this.saveOwnCharacterSystemPrompt(prompt);
             },
-            onMediaDeviceChange: async (kind, deviceId) => {
-                if (!this.JitsiInstance) {
-                    throw new Error("Media controls are not ready yet.");
+            onLanguageSave: async (language: AppLanguage) => {
+                await this.saveLanguagePreference(language);
+            },
+            onMediaToggle: async (kind, enabled) => {
+                if (kind === "audioinput") {
+                    return this.setLocalAudioEnabled(enabled);
                 }
+                return this.setLocalVideoEnabled(enabled);
+            },
+            onMediaDeviceChange: async (kind, deviceId) => {
+                const mediaControls = this.ensureMediaControls();
                 if (kind === "audiooutput") {
-                    this.JitsiInstance.changeAudioOutput(deviceId);
+                    mediaControls.changeAudioOutput(deviceId);
                     return;
                 }
                 if (kind === "audioinput") {
-                    this.JitsiInstance.changeAudioInput(deviceId);
+                    mediaControls.changeAudioInput(deviceId);
                     return;
                 }
-                this.JitsiInstance.changeVideoInput(deviceId);
+                mediaControls.changeVideoInput(deviceId);
             }
         });
+    }
+
+    private ensureMediaControls(): JitsiInstance {
+        if (!this.JitsiInstance) {
+            this.JitsiInstance = new JitsiInstance();
+        }
+
+        return this.JitsiInstance;
+    }
+
+    private async ensureRealtimeMediaRoom(): Promise<JitsiConference> {
+        const unavailableReason = this.getPresentationMediaUnavailableReason();
+        if (unavailableReason) {
+            throw new Error(unavailableReason);
+        }
+
+        if (this.room) {
+            return this.room;
+        }
+
+        if (!this.roomInitializationPromise) {
+            const mediaControls = this.ensureMediaControls();
+            this.roomInitializationError = null;
+            this.roomInitializationPromise = Promise.race<JitsiConference>([
+                mediaControls.create(),
+                new Promise<JitsiConference>((_resolve, reject) => {
+                    window.setTimeout(() => reject(new Error(this.t("presentation.controls.errors.jitsiInitTimeout"))), 12000);
+                })
+            ]).then(room => {
+                this.room = room;
+                this.room.setDisplayName(this.userName);
+                this.room.addCommandListener("presentationAudienceUnmuteRequest", values => {
+                    const parsedObj = JSON.parse(values.value);
+                    if (parsedObj.id !== this.room?.myUserId()) {
+                        this.handlePresentationAudienceUnmuteRequest(parsedObj);
+                    }
+                });
+                this.recordActivity({
+                    type: "room_joined",
+                    payload: {
+                        roomId: room.getName?.() ?? "unknown-room"
+                    }
+                });
+                return room;
+            }).catch(error => {
+                console.warn("Jitsi initialization failed", error);
+                this.room = null;
+                this.roomInitializationPromise = null;
+                const message = error instanceof Error && error.message
+                    ? error.message
+                    : String(error ?? this.t("presentation.controls.errors.mediaUnavailable"));
+                this.roomInitializationError = this.t("presentation.controls.errors.jitsiInitFailed", { message });
+                throw new Error(this.roomInitializationError);
+            });
+        }
+
+        return this.roomInitializationPromise;
     }
 
     private getCurrentUserId(): string {
@@ -363,7 +592,7 @@ export class ThisIsMyDepartmentApp extends Game {
             this.getPlayer().changeSprite(spriteIndex);
         }
 
-        this.showNotification("Avatar updated.");
+        this.showNotification(this.t("profile.avatarSaved"));
     }
 
     private async saveOwnCharacterSystemPrompt(prompt: string): Promise<void> {
@@ -372,7 +601,29 @@ export class ThisIsMyDepartmentApp extends Game {
             throw new Error("Character prompt update failed.");
         }
         this.setCurrentUserProfile(result.profile);
-        this.showNotification(prompt.trim().length > 0 ? "Character AI prompt saved." : "Character AI prompt cleared.");
+        this.showNotification(prompt.trim().length > 0 ? this.t("profile.promptSaved") : this.t("profile.promptCleared"));
+    }
+
+    private async saveLanguagePreference(language: AppLanguage): Promise<void> {
+        const nextLanguage = normalizeLanguage(language);
+        storeLanguagePreference(nextLanguage);
+        const result = await saveProfilePreferences({
+            language: nextLanguage
+        });
+
+        if (result) {
+            this.setCurrentUserProfile(result.profile);
+        } else if (this.currentUserProfile) {
+            this.setCurrentUserProfile({
+                ...this.currentUserProfile,
+                preferences: {
+                    ...(this.currentUserProfile.preferences ?? {}),
+                    language: nextLanguage
+                }
+            });
+        }
+
+        this.applyLanguage(nextLanguage);
     }
 
     private async enumerateMediaDevices(): Promise<MediaDeviceInfo[]> {
@@ -396,6 +647,15 @@ export class ThisIsMyDepartmentApp extends Game {
         throw new Error("Media device enumeration is not available in this browser.");
     }
 
+    private async requestDevicePermission(constraints: MediaStreamConstraints): Promise<void> {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error("This browser does not support microphone or camera access.");
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream.getTracks().forEach(track => track.stop());
+    }
+
     private getDeviceDisplayLabel(device: MediaDeviceInfo, index: number): string {
         const label = device.label?.trim();
         if (label) {
@@ -403,20 +663,57 @@ export class ThisIsMyDepartmentApp extends Game {
         }
         if (device.deviceId === "default") {
             if (device.kind === "audioinput") {
-                return "Default Microphone";
+                return `${this.t("settings.media.audioinput")} (Default)`;
             }
             if (device.kind === "audiooutput") {
-                return "Default Speaker";
+                return `${this.t("settings.media.audiooutput")} (Default)`;
             }
-            return "Default Camera";
+            return `${this.t("settings.media.videoinput")} (Default)`;
         }
         if (device.kind === "audioinput") {
-            return `Microphone ${index}`;
+            return this.t("device.fallback.audioinput", { index });
         }
         if (device.kind === "audiooutput") {
-            return `Speaker ${index}`;
+            return this.t("device.fallback.audiooutput", { index });
         }
-        return `Camera ${index}`;
+        return this.t("device.fallback.videoinput", { index });
+    }
+
+    public t(key: string, params?: Record<string, string | number>): string {
+        return translate(this.currentLanguage, key, params);
+    }
+
+    private applyLanguage(language: AppLanguage): void {
+        const nextLanguage = normalizeLanguage(language);
+        const hasChanged = nextLanguage !== this.currentLanguage;
+        this.currentLanguage = nextLanguage;
+        applyLanguageToDocument(nextLanguage);
+        if (hasChanged) {
+            this.refreshLocalizedUi();
+        }
+    }
+
+    private refreshLocalizedUi(): void {
+        this.conversationWindow?.setLanguage(this.currentLanguage);
+        if (this.activeConversationPartner) {
+            this.presentConversation(this.activeConversationPartner);
+        }
+
+        if (this.characterStatusOverlay) {
+            this.characterStatusOverlay.close();
+            this.characterStatusOverlay = undefined;
+            this.ensureCharacterStatusOverlay();
+        }
+
+        this.presentationSessionOverlay?.refresh();
+
+        if (this.isInteractionChooserOpen()) {
+            this.interactionChooserHelp!.textContent = this.t("interaction.chooser.help");
+            this.syncInteractionChooserOptions();
+            this.renderInteractionChooser();
+        }
+
+        this.updateInteractionHint();
     }
 
     private cloneCurrentUserProfile(profile: CurrentUserProfile | null): CurrentUserProfile | null {
@@ -540,17 +837,77 @@ export class ThisIsMyDepartmentApp extends Game {
         }
     }
 
+    public sendRealtimeCommand(eventName: string, value: any): void {
+        const userId = this.room?.myUserId();
+        if (userId != null) {
+            this.room?.sendCommand(eventName, { value: JSON.stringify({ ...value, spriteIndex: this.getPlayer().spriteIndex, id: userId }) });
+        }
+    }
+
     public showNotification(str: string): void {
         if (this.isInGameScene()) {
             this.getGameScene().notificationNode?.showNotification(str);
         }
     }
 
+    public beginLocalPresentation(boardId: number, slide: number): void {
+        this.localPresentationSession = { boardId, slide };
+    }
+
+    public updateLocalPresentationSlide(boardId: number, slide: number): void {
+        if (!this.localPresentationSession || this.localPresentationSession.boardId !== boardId) {
+            this.localPresentationSession = { boardId, slide };
+            return;
+        }
+        this.localPresentationSession.slide = slide;
+    }
+
+    public endLocalPresentation(boardId: number): void {
+        if (this.localPresentationSession?.boardId === boardId) {
+            this.localPresentationSession = null;
+        }
+    }
+
+    public rebroadcastLocalPresentationState(): void {
+        if (!this.localPresentationSession) {
+            return;
+        }
+        this.sendRealtimeCommand("presentationUpdate", {
+            presentationBoardId: this.localPresentationSession.boardId,
+            slide: this.localPresentationSession.slide
+        });
+    }
+
+    public isPresentationSessionActive(boardId: number | undefined): boolean {
+        if (boardId == null) {
+            return false;
+        }
+        return this.localPresentationSession?.boardId === boardId || this.remotePresentationSessions.has(boardId);
+    }
+
+    public getPresentationSessionSlide(boardId: number | undefined): number | null {
+        if (boardId == null) {
+            return null;
+        }
+        if (this.localPresentationSession?.boardId === boardId) {
+            return this.localPresentationSession.slide;
+        }
+        return this.remotePresentationSessions.get(boardId)?.slide ?? null;
+    }
+
+    private handlePresentationAudienceUnmuteRequest(args: { id: string; presenterName?: string; count?: number }): void {
+        const presenterName = args.presenterName?.trim()
+            || this.room?.getParticipantById(args.id)?.getDisplayName()
+            || this.t("interaction.subtitle.presentation");
+        this.showNotification(this.t("presentation.controls.notifications.requestedUnmute", { name: presenterName }));
+    }
+
     public handleOtherPlayerPresentationUpdate(args: { presentationBoardId: number, slide: number; id: string}): void {
         const presentationBoard = this.getGameScene()?.rootNode.getDescendantsByType<PresentationBoardNode>(PresentationBoardNode)
             .find(n => n.boardId === args.presentationBoardId);
         if (args.slide === -1) {
-            this.getCamera().focus(this.getPlayer(), { follow: true });
+            this.remotePresentationSessions.delete(args.presentationBoardId);
+            this.getCamera().focus(this.getPlayer(), { duration: 0, follow: true });
             presentationBoard?.endPresentation();
             this.preventPlayerInteraction = clamp(this.preventPlayerInteraction - 1, 0, Infinity);
             this.turnOnAllLights();
@@ -572,13 +929,23 @@ export class ThisIsMyDepartmentApp extends Game {
                 localVid.hidden = false;
             }
         } else if (this.getCamera().getFollow() === presentationBoard && presentationBoard != null) {
+            this.remotePresentationSessions.set(args.presentationBoardId, {
+                boardId: args.presentationBoardId,
+                slide: args.slide,
+                presenterId: args.id
+            });
             presentationBoard.setSlide(args.slide);
         } else if (presentationBoard != null) {
+            this.remotePresentationSessions.set(args.presentationBoardId, {
+                boardId: args.presentationBoardId,
+                slide: args.slide,
+                presenterId: args.id
+            });
             this.showNotification((this.room?.getParticipantById(args.id).getDisplayName() ?? "anonymous") + " started to present");
-            this.getCamera().focus(presentationBoard).then((successful) => {
+            this.getCamera().focus(presentationBoard, { duration: 0, follow: true }).then((successful) => {
                 if (successful) {
-                    this.getCamera().setFollow(presentationBoard);
-                    presentationBoard?.startPresentation();
+                    presentationBoard?.startPresentation(args.slide, false);
+                    presentationBoard?.setSlide(args.slide);
                     this.preventPlayerInteraction++;
                     this.dimLights();
                     this.wasAudioMuted = !!this.room?.getLocalAudioTrack()?.isMuted();
@@ -861,21 +1228,21 @@ export class ThisIsMyDepartmentApp extends Game {
     }
 
     public findNearbyOtherPlayer(): OtherPlayerNode | null {
+        return this.findNearbyOtherPlayers()[0] ?? null;
+    }
+
+    public findNearbyOtherPlayers(): OtherPlayerNode[] {
         const player = this.getPlayer();
         const playerPos = player.getScenePosition();
         const range = 50;
-        let closest: OtherPlayerNode | null = null;
-        let closestDistance = Number.POSITIVE_INFINITY;
-
-        Object.values(this.players).forEach(otherPlayer => {
-            const distance = otherPlayer.getScenePosition().getSquareDistance(playerPos);
-            if (distance <= range ** 2 && distance < closestDistance) {
-                closest = otherPlayer;
-                closestDistance = distance;
-            }
-        });
-
-        return closest;
+        return Object.values(this.players)
+            .map(otherPlayer => ({
+                otherPlayer,
+                distance: otherPlayer.getScenePosition().getSquareDistance(playerPos)
+            }))
+            .filter(entry => entry.distance <= range ** 2)
+            .sort((left, right) => left.distance - right.distance)
+            .map(entry => entry.otherPlayer);
     }
 
     private ensureInteractionHint(): void {
@@ -884,44 +1251,338 @@ export class ThisIsMyDepartmentApp extends Game {
         }
 
         const hint = document.createElement("div");
+        const key = document.createElement("span");
+        const text = document.createElement("span");
         hint.hidden = true;
-        hint.style.position = "fixed";
-        hint.style.left = "50%";
-        hint.style.bottom = "26px";
-        hint.style.transform = "translateX(-50%)";
-        hint.style.zIndex = "9997";
-        hint.style.padding = "8px 14px";
-        hint.style.border = "1px solid rgba(196, 215, 154, 0.45)";
-        hint.style.background = "rgba(12, 20, 15, 0.9)";
-        hint.style.color = "#eef4d2";
-        hint.style.font = "600 12px 'Trebuchet MS', 'Segoe UI', sans-serif";
-        hint.style.letterSpacing = "0.06em";
-        hint.style.textTransform = "uppercase";
-        hint.style.pointerEvents = "none";
-        hint.style.boxShadow = "0 10px 24px rgba(0, 0, 0, 0.35)";
-        hint.style.clipPath = "polygon(0 8px, 8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px))";
+        hint.className = "timd-interaction-hint";
+        key.className = "timd-interaction-hint__key";
+        key.textContent = this.getPrimaryInteractionKeyLabel();
+        text.className = "timd-interaction-hint__text";
+        hint.append(key, text);
         document.body.appendChild(hint);
         this.interactionHint = hint;
+        this.interactionHintText = text;
+    }
+
+    private ensureInteractionChooser(): void {
+        if (this.interactionChooserBackdrop && this.interactionChooserPanel && this.interactionChooserList && this.interactionChooserTitle && this.interactionChooserHelp) {
+            return;
+        }
+
+        const backdrop = document.createElement("div");
+        backdrop.hidden = true;
+        backdrop.className = "timd-interaction-chooser-backdrop";
+        backdrop.addEventListener("click", () => this.closeInteractionChooser());
+
+        const panel = document.createElement("div");
+        panel.hidden = true;
+        panel.className = "timd-interaction-chooser";
+        panel.addEventListener("click", event => event.stopPropagation());
+
+        const title = document.createElement("div");
+        title.className = "timd-interaction-chooser__title";
+
+        const help = document.createElement("div");
+        help.className = "timd-interaction-chooser__help";
+
+        const list = document.createElement("div");
+        list.className = "timd-interaction-chooser__list";
+
+        panel.append(title, help, list);
+        document.body.append(backdrop, panel);
+
+        this.interactionChooserBackdrop = backdrop;
+        this.interactionChooserPanel = panel;
+        this.interactionChooserTitle = title;
+        this.interactionChooserHelp = help;
+        this.interactionChooserList = list;
     }
 
     private updateInteractionHint(): void {
-        if (!this.interactionHint || !this.isInGameScene()) {
+        if (!this.interactionHint || !this.interactionHintText || !this.isInGameScene()) {
             return;
         }
 
-        if (this.activePlayerConversation) {
+        if (this.isInteractionChooserOpen()) {
+            this.syncInteractionChooserOptions();
             this.interactionHint.hidden = true;
             return;
         }
 
-        const nearbyPlayer = this.findNearbyOtherPlayer();
-        if (!nearbyPlayer) {
+        if (this.activeConversationPartner || this.currentDialog) {
             this.interactionHint.hidden = true;
             return;
         }
 
-        this.interactionHint.textContent = `Press E to Chat with ${nearbyPlayer.getDisplayName()}`;
+        const options = this.buildNearbyInteractionOptions();
+        if (options.length === 0) {
+            this.interactionHint.hidden = true;
+            return;
+        }
+
+        this.interactionHintText.textContent = options.length === 1
+            ? this.t("interaction.hint.single", { key: this.getPrimaryInteractionKeyLabel(), action: options[0].prompt })
+            : this.t("interaction.hint.multiple", { key: this.getPrimaryInteractionKeyLabel(), count: options.length });
         this.interactionHint.hidden = false;
+    }
+
+    public isInteractionChooserOpen(): boolean {
+        return !!this.interactionChooserPanel && !this.interactionChooserPanel.hidden;
+    }
+
+    public handlePlayerInteract(): boolean {
+        if (this.activeConversationPartner || this.currentDialog) {
+            return false;
+        }
+
+        const options = this.buildNearbyInteractionOptions();
+        if (options.length === 0) {
+            return false;
+        }
+
+        if (options.length === 1) {
+            options[0].activate();
+            return true;
+        }
+
+        this.openInteractionChooser(options);
+        return true;
+    }
+
+    public navigateInteractionChooser(delta: number): void {
+        if (!this.isInteractionChooserOpen() || this.interactionOptions.length === 0) {
+            return;
+        }
+
+        const optionCount = this.interactionOptions.length;
+        this.interactionSelectionIndex = (this.interactionSelectionIndex + delta + optionCount) % optionCount;
+        this.renderInteractionChooser();
+    }
+
+    public confirmInteractionChoice(): boolean {
+        if (!this.isInteractionChooserOpen()) {
+            return false;
+        }
+
+        const currentOptions = this.buildNearbyInteractionOptions();
+        if (currentOptions.length === 0) {
+            this.closeInteractionChooser();
+            return false;
+        }
+
+        const selectedKey = this.interactionOptions[this.interactionSelectionIndex]?.key;
+        this.interactionOptions = currentOptions;
+        this.interactionOptionSignature = this.getInteractionOptionSignature(currentOptions);
+        this.interactionSelectionIndex = Math.max(0, currentOptions.findIndex(option => option.key === selectedKey));
+
+        const selectedOption = this.interactionOptions[this.interactionSelectionIndex] ?? this.interactionOptions[0];
+        this.closeInteractionChooser();
+        selectedOption?.activate();
+        return !!selectedOption;
+    }
+
+    public closeInteractionChooser(): void {
+        if (!this.isInteractionChooserOpen()) {
+            return;
+        }
+
+        this.interactionChooserBackdrop!.hidden = true;
+        this.interactionChooserPanel!.hidden = true;
+        this.interactionOptions = [];
+        this.interactionSelectionIndex = 0;
+        this.interactionOptionSignature = "";
+        this.preventPlayerInteraction = clamp(this.preventPlayerInteraction - 1, 0, Infinity);
+    }
+
+    private openInteractionChooser(options: InteractionOption[]): void {
+        this.ensureInteractionChooser();
+        this.interactionOptions = options;
+        this.interactionSelectionIndex = 0;
+        this.interactionOptionSignature = this.getInteractionOptionSignature(options);
+        this.interactionChooserBackdrop!.hidden = false;
+        this.interactionChooserPanel!.hidden = false;
+        this.interactionChooserTitle!.textContent = this.t("interaction.chooser.title", { count: options.length });
+        this.interactionChooserHelp!.textContent = this.t("interaction.chooser.help");
+        this.renderInteractionChooser();
+        this.preventPlayerInteraction++;
+    }
+
+    private syncInteractionChooserOptions(): void {
+        if (!this.isInteractionChooserOpen()) {
+            return;
+        }
+
+        const refreshedOptions = this.buildNearbyInteractionOptions();
+        if (refreshedOptions.length === 0) {
+            this.closeInteractionChooser();
+            return;
+        }
+
+        const previousKey = this.interactionOptions[this.interactionSelectionIndex]?.key;
+        const nextSignature = this.getInteractionOptionSignature(refreshedOptions);
+        if (nextSignature === this.interactionOptionSignature) {
+            return;
+        }
+
+        this.interactionOptions = refreshedOptions;
+        this.interactionOptionSignature = nextSignature;
+        const preservedIndex = refreshedOptions.findIndex(option => option.key === previousKey);
+        this.interactionSelectionIndex = preservedIndex >= 0 ? preservedIndex : 0;
+        this.interactionChooserTitle!.textContent = this.t("interaction.chooser.title", { count: refreshedOptions.length });
+        this.renderInteractionChooser();
+    }
+
+    private renderInteractionChooser(): void {
+        if (!this.interactionChooserList) {
+            return;
+        }
+
+        while (this.interactionChooserList.firstChild) {
+            this.interactionChooserList.removeChild(this.interactionChooserList.firstChild);
+        }
+
+        this.interactionOptions.forEach((option, index) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = index === this.interactionSelectionIndex
+                ? "timd-interaction-chooser__item timd-interaction-chooser__item--selected"
+                : "timd-interaction-chooser__item";
+
+            const title = document.createElement("span");
+            title.className = "timd-interaction-chooser__item-title";
+            title.textContent = option.title;
+
+            const subtitle = document.createElement("span");
+            subtitle.className = "timd-interaction-chooser__item-subtitle";
+            subtitle.textContent = option.subtitle;
+
+            button.append(title, subtitle);
+            button.addEventListener("mouseenter", () => {
+                this.interactionSelectionIndex = index;
+                this.renderInteractionChooser();
+            });
+            button.addEventListener("click", () => {
+                this.interactionSelectionIndex = index;
+                this.confirmInteractionChoice();
+            });
+            this.interactionChooserList!.appendChild(button);
+        });
+    }
+
+    private buildNearbyInteractionOptions(): InteractionOption[] {
+        if (!this.isInGameScene()) {
+            return [];
+        }
+
+        const player = this.getPlayer();
+        const playerPosition = player.getScenePosition();
+        const options = new Map<string, InteractionOption>();
+
+        player.getInteractableNodes()
+            .filter(node => node.canInteract())
+            .sort((left, right) => left.getScenePosition().getSquareDistance(playerPosition) - right.getScenePosition().getSquareDistance(playerPosition))
+            .forEach(node => {
+                const option = this.createInteractionOptionForNode(node);
+                options.set(option.key, option);
+            });
+
+        this.findNearbyOtherPlayers().forEach(otherPlayer => {
+            const playerId = String(otherPlayer.getIdentifier());
+            options.set(`player:${playerId}`, {
+                key: `player:${playerId}`,
+                prompt: this.t("interaction.action.chatWith", { name: otherPlayer.getDisplayName() }),
+                title: this.t("interaction.action.chatWith", { name: otherPlayer.getDisplayName() }),
+                subtitle: this.t("interaction.subtitle.player"),
+                activate: () => this.startPlayerConversation(playerId, otherPlayer.getDisplayName())
+            });
+        });
+
+        return Array.from(options.values());
+    }
+
+    private createInteractionOptionForNode(node: InteractiveNode | NpcNode): InteractionOption {
+        if (node instanceof LLMAgentNode) {
+            const label = node.getDisplayName();
+            return {
+                key: `agent:${node.getAgentId()}`,
+                prompt: this.t("interaction.action.chatWith", { name: label }),
+                title: this.t("interaction.action.chatWith", { name: label }),
+                subtitle: this.t("interaction.subtitle.ai"),
+                activate: () => node.interact()
+            };
+        }
+
+        if (node instanceof IFrameNode) {
+            const label = node.getInteractionLabel() || this.t("interaction.fallback.sharedPage");
+            return {
+                key: `iframe:${node.getId() ?? label}`,
+                prompt: this.t("interaction.action.open", { name: label }),
+                title: this.t("interaction.action.open", { name: label }),
+                subtitle: this.t("interaction.subtitle.iframe"),
+                activate: () => node.interact()
+            };
+        }
+
+        if (node instanceof ChairNode) {
+            const label = node.getInteractionLabel() || this.t("interaction.fallback.seat");
+            return {
+                key: `chair:${node.getId() ?? label}`,
+                prompt: this.t("interaction.action.sit"),
+                title: this.t("interaction.action.sit"),
+                subtitle: label,
+                activate: () => node.interact()
+            };
+        }
+
+        if (node instanceof PresentationNode) {
+            const label = node.getInteractionLabel() || this.t("interaction.fallback.presentation");
+            return {
+                key: `presentation:${node.getId() ?? label}`,
+                prompt: this.t("interaction.action.start", { name: label }),
+                title: this.t("interaction.action.start", { name: label }),
+                subtitle: this.t("interaction.subtitle.presentation"),
+                activate: () => node.interact()
+            };
+        }
+
+        if (node instanceof SwitchNode) {
+            const label = node.getInteractionLabel() || this.t("interaction.fallback.board");
+            return {
+                key: `switch:${node.getId() ?? label}`,
+                prompt: this.t("interaction.action.open", { name: label }),
+                title: this.t("interaction.action.open", { name: label }),
+                subtitle: this.t("interaction.subtitle.tool"),
+                activate: () => node.interact()
+            };
+        }
+
+        if (node instanceof NpcNode) {
+            const label = node.getInteractionLabel() || this.t("interaction.fallback.npc");
+            return {
+                key: `npc:${node.getId() ?? label}`,
+                prompt: this.t("interaction.action.talkTo", { name: label }),
+                title: this.t("interaction.action.talkTo", { name: label }),
+                subtitle: this.t("interaction.subtitle.character"),
+                activate: () => node.interact()
+            };
+        }
+
+        const label = node.getInteractionLabel() || this.t("interaction.fallback.object");
+        return {
+            key: `interactive:${node.getId() ?? label}`,
+            prompt: this.t("interaction.action.interactWith", { name: label }),
+            title: this.t("interaction.action.interactWith", { name: label }),
+            subtitle: this.t("interaction.subtitle.object"),
+            activate: () => node.interact()
+        };
+    }
+
+    private getInteractionOptionSignature(options: InteractionOption[]): string {
+        return options.map(option => `${option.key}:${option.title}`).join("|");
+    }
+
+    private getPrimaryInteractionKeyLabel(): string {
+        return this.input.currentControllerFamily === ControllerFamily.GAMEPAD ? "Y" : "E";
     }
 
     public getGameScene(): GameScene {
@@ -1120,6 +1781,7 @@ export class ThisIsMyDepartmentApp extends Game {
         const scene = this.getGameScene();
         if (!this.conversationWindow) {
             this.conversationWindow = new ConversationWindow();
+            this.conversationWindow.setLanguage(this.currentLanguage);
             this.conversationWindow.onSubmit.connect(text => {
                 void this.handleConversationWindowSubmit(text);
             }, this);
@@ -1131,6 +1793,7 @@ export class ThisIsMyDepartmentApp extends Game {
             this.conversationWindow.remove();
             scene.rootNode.appendChild(this.conversationWindow);
         }
+        this.conversationWindow.setLanguage(this.currentLanguage);
         return this.conversationWindow;
     }
 
@@ -1173,19 +1836,19 @@ export class ThisIsMyDepartmentApp extends Game {
             ? (!isAgentConversation || pending)
             : !isPlayerConversation;
 
-        let statusText = "Enter to send. Shift+Enter for newline.";
+        let statusText = this.t("conversation.status.default");
         if (pending) {
-            statusText = `${partner.name} is replying...`;
+            statusText = this.t("conversation.status.replying", { name: partner.name });
         } else if (partner.type === "player" && !isPlayerConversation) {
-            statusText = "Conversation is visible, but sending stays disabled until the live chat is active.";
+            statusText = this.t("conversation.status.playerInactive");
         }
 
         return {
-            modeLabel: partner.type === "agent" ? "AI character" : "Direct conversation",
+            modeLabel: partner.type === "agent" ? this.t("conversation.mode.agent") : this.t("conversation.mode.player"),
             placeholder: partner.type === "agent"
-                ? `Ask ${partner.name} something...`
-                : `Message ${partner.name}...`,
-            submitLabel: pending ? "Waiting..." : "Send",
+                ? this.t("conversation.placeholder.agent", { name: partner.name })
+                : this.t("conversation.placeholder.player", { name: partner.name }),
+            submitLabel: pending ? this.t("conversation.submit.waiting") : this.t("conversation.submit.send"),
             statusText,
             disabled
         };
@@ -1700,15 +2363,20 @@ export class ThisIsMyDepartmentApp extends Game {
         return this.conversationPartners.get(this.activeConversationPartner)?.type === "player";
     }
 
-    private refreshConversationMediaState(): void {
+    private async syncConversationMediaState(): Promise<void> {
         if (!this.JitsiInstance) {
             return;
         }
-        void this.JitsiInstance.syncConversationMedia(this.shouldShowConversationMedia())
-            .finally(() => {
-                this.characterStatusOverlay?.refresh();
-                this.updateConversationMediaLayout();
-            });
+        try {
+            await this.JitsiInstance.syncConversationMedia(this.shouldShowConversationMedia());
+        } finally {
+            this.characterStatusOverlay?.refresh();
+            this.updateConversationMediaLayout();
+        }
+    }
+
+    private refreshConversationMediaState(): void {
+        void this.syncConversationMediaState();
     }
 }
 
@@ -1725,4 +2393,45 @@ export class ThisIsMyDepartmentApp extends Game {
     await game.scenes.setScene(LoadingScene);
     (window as any).game = game;
     game.start();
-})();
+})().catch((error: unknown) => {
+    console.error("Application startup failed", error);
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    const overlay = document.createElement("div");
+    overlay.style.position = "fixed";
+    overlay.style.top = "0";
+    overlay.style.right = "0";
+    overlay.style.bottom = "0";
+    overlay.style.left = "0";
+    overlay.style.zIndex = "20000";
+    overlay.style.display = "flex";
+    overlay.style.alignItems = "center";
+    overlay.style.justifyContent = "center";
+    overlay.style.padding = "24px";
+    overlay.style.background = "rgba(7, 10, 18, 0.94)";
+    overlay.style.color = "#eef3ff";
+    overlay.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif";
+
+    const panel = document.createElement("div");
+    panel.style.maxWidth = "720px";
+    panel.style.width = "100%";
+    panel.style.padding = "20px 22px";
+    panel.style.border = "1px solid rgba(255, 255, 255, 0.14)";
+    panel.style.background = "linear-gradient(160deg, rgba(22, 29, 44, 0.98), rgba(11, 16, 26, 0.98))";
+    panel.style.boxShadow = "0 24px 60px rgba(0, 0, 0, 0.42)";
+
+    const title = document.createElement("h1");
+    title.textContent = "Startup Error";
+    title.style.margin = "0 0 10px";
+    title.style.fontSize = "24px";
+
+    const body = document.createElement("pre");
+    body.textContent = message;
+    body.style.margin = "0";
+    body.style.whiteSpace = "pre-wrap";
+    body.style.wordBreak = "break-word";
+    body.style.font = "14px/1.5 'SFMono-Regular', Consolas, monospace";
+
+    panel.append(title, body);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+});

@@ -37,6 +37,8 @@ export class LLMAgentNode extends NpcNode {
         this.currentSystemPrompt = args.systemPrompt;
         this.defaultCaption = args.caption ?? "按E键进行互动";
         this.setCaption(this.defaultCaption);
+        this.setInteractionActionLabel("Chat with");
+        this.setInteractionLabel(this.displayName);
         this.setNameLabel(this.displayName);
         if (args.walkArea) {
             this.wanderArea = {

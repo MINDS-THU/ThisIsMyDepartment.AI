@@ -6,6 +6,7 @@ import { asset } from "../../engine/assets/Assets";
 import { TextNode } from "../../engine/scene/TextNode";
 import { BitmapFont } from "../../engine/assets/BitmapFont";
 import { Layer, STANDARD_FONT } from "../constants";
+import { AppLanguage, DEFAULT_LANGUAGE, getCanvasUiFontStack, getLocalizedText, readLocalizedTiledText } from "../i18n";
 import { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
 
 export interface IFrameNodeArgs extends SceneNodeArgs {
@@ -31,6 +32,7 @@ export class IFrameNode extends InteractiveNode {
     private videos?: HTMLElement;
     private iFrame?: HTMLIFrameElement;
     private readonly labelNode?: TextNode<ThisIsMyDepartmentApp>;
+    private readonly labelTextByLanguage: Partial<Record<AppLanguage, string>>;
     private readonly handleCloseButtonClick = () => this.close();
     private closeButtonListenerAttached = false;
 
@@ -40,26 +42,29 @@ export class IFrameNode extends InteractiveNode {
             anchor: Direction.CENTER,
             tag: "off",
             ...args
-        }, "按E键进行互动");
+        }, "");
         this.onUpdate = onUpdate;
         this.url = args.tiledObject?.getOptionalProperty("url", "string")?.getValue() ?? "";
         this.range = args.tiledObject?.getOptionalProperty("range", "int")?.getValue() ?? 30;
         this.needpasting = args.tiledObject?.getOptionalProperty("needpasting", "bool")?.getValue() ?? false;
 
-        const labelText = args.tiledObject?.getOptionalProperty("label", "string")?.getValue()
-            ?? args.tiledObject?.getName()
-            ?? "";
-        if (labelText.trim().length > 0) {
+        this.labelTextByLanguage = readLocalizedTiledText(args.tiledObject, "label", args.tiledObject?.getName() ?? "");
+        const labelText = getLocalizedText(DEFAULT_LANGUAGE, this.labelTextByLanguage, "").trim();
+        this.setInteractionActionLabel("Open");
+        if (labelText.length > 0) {
+            this.setInteractionLabels(this.labelTextByLanguage);
             this.labelNode = new TextNode<ThisIsMyDepartmentApp>({
                 font: IFrameNode.labelFont,
                 color: "white",
                 outlineColor: "black",
-                fallbackFont: "16px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif",
+                fallbackFont: `16px ${getCanvasUiFontStack()}`,
                 fallbackLineHeight: 22,
                 y: -30,
                 layer: Layer.OVERLAY
             }).appendTo(this);
-            this.labelNode.setText(labelText.trim());
+            this.labelNode.setText(labelText);
+        } else {
+            this.setInteractionLabel("Link");
         }
     }
 
@@ -80,7 +85,10 @@ export class IFrameNode extends InteractiveNode {
 
     public update(dt: number, time: number): void {
         const keyLabel = this.getPrimaryActionKeyLabel();
-        this.caption = `按${keyLabel}键打开`;
+        this.caption = this.getGame().t("interaction.caption.open", { key: keyLabel });
+        if (this.labelNode) {
+            this.labelNode.setText(getLocalizedText(this.getGame().getLanguage(), this.labelTextByLanguage, ""));
+        }
         super.update(dt, time);
     }
 
@@ -135,7 +143,7 @@ export class IFrameNode extends InteractiveNode {
                 this.pasteInput?.remove();
             });
             this.pasteInput.style.position = "absolute";
-            this.pasteInput.placeholder = "Paste code here";
+            this.pasteInput.placeholder = this.getGame().t("iframe.paste.placeholder");
             this.pasteInput.style.zIndex = "4001";
             this.pasteInput.style.left = `calc(50% - ${this.pasteInput.width}px / 2)`;
             this.pasteInput.style.top = "10px";

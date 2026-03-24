@@ -3,7 +3,7 @@ import { appendMockActivity } from "../storage/memory/activityStore";
 import { getSessionIdFromRequest } from "../auth/session";
 import { parseJsonBody } from "../http/body";
 import { sendJson } from "../http/response";
-import { getSessionContext, updateAvatarProfileForUser, updateCharacterSystemPromptForUser } from "../storage/memory/bootstrapStore";
+import { getSessionContext, updateAvatarProfileForUser, updateCharacterSystemPromptForUser, updatePreferencesForUser } from "../storage/memory/bootstrapStore";
 
 export const handleGetCurrentUserRoute = (request: IncomingMessage, response: ServerResponse): void => {
     const sessionContext = getSessionContext(getSessionIdFromRequest(request));
@@ -29,14 +29,16 @@ export const handleUpdateProfileRoute = async (request: IncomingMessage, respons
         const payload = await parseJsonBody<{
             avatar?: { spriteIndex?: number };
             characterSystemPrompt?: string;
+            preferences?: Record<string, unknown>;
         }>(request);
         const spriteIndex = payload.avatar?.spriteIndex;
         const hasAvatarUpdate = payload.avatar != null;
         const hasCharacterPromptUpdate = typeof payload.characterSystemPrompt === "string";
+        const hasPreferencesUpdate = payload.preferences != null && typeof payload.preferences === "object" && !Array.isArray(payload.preferences);
 
-        if (!hasAvatarUpdate && !hasCharacterPromptUpdate) {
+        if (!hasAvatarUpdate && !hasCharacterPromptUpdate && !hasPreferencesUpdate) {
             sendJson(request, response, 400, {
-                error: "Profile update requires avatar and/or characterSystemPrompt"
+                error: "Profile update requires avatar, characterSystemPrompt, and/or preferences"
             });
             return;
         }
@@ -75,6 +77,10 @@ export const handleUpdateProfileRoute = async (request: IncomingMessage, respons
                     hasPrompt: (payload.characterSystemPrompt ?? "").trim().length > 0
                 }
             });
+        }
+
+        if (hasPreferencesUpdate) {
+            profile = updatePreferencesForUser(sessionContext.user.userId, payload.preferences ?? {});
         }
 
         sendJson(request, response, 200, {

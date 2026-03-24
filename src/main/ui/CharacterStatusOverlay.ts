@@ -1,5 +1,6 @@
 import { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
 import { ActivitySummary, fetchActivitySummary } from "../services/activity";
+import { getUiFontStack } from "../i18n";
 
 export class CharacterStatusOverlay {
     private static readonly PANEL_TEXT = "#eef3ff";
@@ -77,13 +78,14 @@ export class CharacterStatusOverlay {
             return;
         }
 
+        const app = this.app;
         const currentUser = this.app.getCurrentUser();
         const profile = this.app.getCurrentUserProfile();
         const spriteIndex = profile?.avatar?.spriteIndex ?? this.app.initialPlayerSprite ?? 0;
         const roles = currentUser?.roles?.filter(Boolean) ?? [];
         const status = this.buildStatusSummary();
-        const affiliation = [currentUser?.organization, currentUser?.department].filter(Boolean).join(" / ") || "Unassigned";
-        const roleText = roles.length > 0 ? roles.join(", ") : "Member";
+        const affiliation = [currentUser?.organization, currentUser?.department].filter(Boolean).join(" / ") || app.t("status.defaultAffiliation");
+        const roleText = roles.length > 0 ? roles.join(", ") : app.t("status.defaultRole");
 
         const snapshotKey = JSON.stringify({
             name: currentUser?.displayName ?? this.app.userName,
@@ -102,7 +104,7 @@ export class CharacterStatusOverlay {
         if (snapshotKey !== this.lastSnapshotKey) {
             this.lastSnapshotKey = snapshotKey;
             if (this.nameValue) {
-                this.nameValue.textContent = currentUser?.displayName ?? this.app.userName ?? "Guest";
+                this.nameValue.textContent = currentUser?.displayName ?? this.app.userName ?? app.t("status.guest");
             }
             if (this.roleValue) {
                 this.roleValue.textContent = roleText;
@@ -124,6 +126,7 @@ export class CharacterStatusOverlay {
     }
 
     private createRoot(): HTMLDivElement {
+        const app = this.app!;
         const root = document.createElement("div");
         root.style.position = "fixed";
         root.style.top = "16px";
@@ -132,7 +135,7 @@ export class CharacterStatusOverlay {
         root.style.pointerEvents = "auto";
         root.style.width = "312px";
         root.style.color = CharacterStatusOverlay.PANEL_TEXT;
-        root.style.fontFamily = "'Segoe UI', sans-serif";
+        root.style.fontFamily = getUiFontStack(app.getLanguage());
 
         const panel = document.createElement("div");
         panel.style.position = "relative";
@@ -214,11 +217,11 @@ export class CharacterStatusOverlay {
         mediaButtons.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))";
         mediaButtons.style.gap = "6px";
         mediaButtons.style.marginTop = "2px";
-        this.audioToggleButton = this.createMediaButton("Mic Off", () => {
+        this.audioToggleButton = this.createMediaButton(app.t("status.audio.off"), () => {
             this.app?.toggleLocalAudio();
             this.refresh();
         });
-        this.videoToggleButton = this.createMediaButton("Cam Off", () => {
+        this.videoToggleButton = this.createMediaButton(app.t("status.video.off"), () => {
             this.app?.toggleLocalVideo();
             this.refresh();
         });
@@ -233,9 +236,9 @@ export class CharacterStatusOverlay {
         statsGrid.style.marginTop = "2px";
         statsGrid.style.minWidth = "0";
 
-        this.playerChatsValue = this.createStatRow(statsGrid, "Chats with Users", "0");
-        this.agentChatsValue = this.createStatRow(statsGrid, "Chats with AI", "0");
-        this.appUsageValue = this.createStatRow(statsGrid, "App Usage Time (min)", "0");
+        this.playerChatsValue = this.createStatRow(statsGrid, app.t("status.chatsUsers"), "0");
+        this.agentChatsValue = this.createStatRow(statsGrid, app.t("status.chatsAi"), "0");
+        this.appUsageValue = this.createStatRow(statsGrid, app.t("status.appUsage"), "0");
 
         identity.appendChild(statsGrid);
 
@@ -246,9 +249,9 @@ export class CharacterStatusOverlay {
         metaGrid.style.minWidth = "0";
         metaGrid.style.marginTop = "10px";
 
-        this.roleValue = this.createMetaRow(metaGrid, "ROLE", "Member");
-        this.affiliationValue = this.createMetaRow(metaGrid, "AFFILIATION", "Unassigned");
-        this.userIdValue = this.createMetaRow(metaGrid, "USER ID", "unknown-user");
+        this.roleValue = this.createMetaRow(metaGrid, app.t("status.role"), app.t("status.defaultRole"));
+        this.affiliationValue = this.createMetaRow(metaGrid, app.t("status.affiliation"), app.t("status.defaultAffiliation"));
+        this.userIdValue = this.createMetaRow(metaGrid, app.t("status.userId"), "unknown-user");
 
         header.appendChild(previewFrame);
         header.appendChild(identity);
@@ -259,8 +262,8 @@ export class CharacterStatusOverlay {
         actions.style.gap = "8px";
         actions.style.marginTop = "10px";
 
-        actions.appendChild(this.createActionButton("Character", () => this.app?.openSettingsOverlay("character")));
-        actions.appendChild(this.createActionButton("Settings", () => this.app?.openSettingsOverlay("media"), true));
+        actions.appendChild(this.createActionButton(app.t("status.action.character"), () => this.app?.openSettingsOverlay("character")));
+        actions.appendChild(this.createActionButton(app.t("status.action.settings"), () => this.app?.openSettingsOverlay("media"), true));
 
         panel.appendChild(trim);
         panel.appendChild(header);
@@ -340,7 +343,7 @@ export class CharacterStatusOverlay {
         button.style.background = CharacterStatusOverlay.BUTTON_BACKGROUND;
         button.style.color = CharacterStatusOverlay.PANEL_TEXT;
         button.style.cursor = "pointer";
-        button.style.font = "600 12px 'Segoe UI', sans-serif";
+        button.style.font = `600 12px ${getUiFontStack(this.app?.getLanguage() ?? "en")}`;
         button.style.textTransform = "uppercase";
         button.style.letterSpacing = "0.08em";
         button.onmouseenter = () => {
@@ -389,7 +392,7 @@ export class CharacterStatusOverlay {
         button.style.background = CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;
         button.style.color = CharacterStatusOverlay.PANEL_TEXT;
         button.style.cursor = "pointer";
-        button.style.font = "600 10px 'Segoe UI', sans-serif";
+        button.style.font = `600 10px ${getUiFontStack(this.app?.getLanguage() ?? "en")}`;
         button.style.textTransform = "uppercase";
         button.style.letterSpacing = "0.06em";
         button.onclick = onClick;
@@ -429,15 +432,15 @@ export class CharacterStatusOverlay {
 
     private buildStatusSummary(): string {
         if (!this.app) {
-            return "Unavailable";
+            return "";
         }
         if (this.app.onlineService?.isConnected()) {
-            return "Room Ready";
+            return this.app.t("status.roomReady");
         }
         if (this.app.JitsiInstance) {
-            return "Joining Room";
+            return this.app.t("status.joiningRoom");
         }
-        return "Starting";
+        return this.app.t("status.starting");
     }
 
     private updateMediaButtons(): void {
@@ -446,7 +449,7 @@ export class CharacterStatusOverlay {
         }
         if (this.audioToggleButton) {
             const audioEnabled = this.app.isLocalAudioEnabled();
-            this.audioToggleButton.textContent = audioEnabled ? "Mic On" : "Mic Off";
+            this.audioToggleButton.textContent = audioEnabled ? this.app.t("status.audio.on") : this.app.t("status.audio.off");
             this.audioToggleButton.style.background = audioEnabled
                 ? CharacterStatusOverlay.BUTTON_BACKGROUND_ACTIVE
                 : CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;
@@ -456,7 +459,7 @@ export class CharacterStatusOverlay {
         }
         if (this.videoToggleButton) {
             const videoEnabled = this.app.isLocalVideoEnabled();
-            this.videoToggleButton.textContent = videoEnabled ? "Cam On" : "Cam Off";
+            this.videoToggleButton.textContent = videoEnabled ? this.app.t("status.video.on") : this.app.t("status.video.off");
             this.videoToggleButton.style.background = videoEnabled
                 ? CharacterStatusOverlay.BUTTON_BACKGROUND_ACTIVE
                 : CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;

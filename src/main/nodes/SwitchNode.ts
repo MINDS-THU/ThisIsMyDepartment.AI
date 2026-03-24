@@ -29,6 +29,8 @@ export class SwitchNode extends InteractiveNode {
             tag: "off",
             ...args
     }, "按E键启动Miro");
+        this.setInteractionActionLabel("Open");
+        this.setInteractionLabel(args.tiledObject?.getName()?.trim() || "Miro board");
         this.onlyOnce = onlyOnce;
         this.onUpdate = onUpdate;
     }

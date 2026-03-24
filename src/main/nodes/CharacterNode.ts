@@ -63,7 +63,7 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
     protected direction: SimpleDirection = SimpleDirection.NONE;
     protected velocity: Vector2;
     protected debug = false;
-    private canInteractWith: InteractiveNode | NpcNode | null = null;
+    private canInteractWith = new Set<InteractiveNode | NpcNode>();
     protected consecutiveXCollisions = 0;
     protected consecutiveYCollisions = 0;
 
@@ -363,17 +363,19 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
     }
 
     public registerInteractiveNode(node: InteractiveNode | NpcNode): void {
-        this.canInteractWith = node;
+        this.canInteractWith.add(node);
     }
 
     public unregisterInteractiveNode(node: InteractiveNode | NpcNode): void {
-        if (this.canInteractWith === node) {
-            this.canInteractWith = null;
-        }
+        this.canInteractWith.delete(node);
     }
 
     public getNodeToInteractWith(): InteractiveNode | NpcNode | null {
-        return this.canInteractWith;
+        return this.getInteractableNodes()[0] ?? null;
+    }
+
+    public getInteractableNodes(): Array<InteractiveNode | NpcNode> {
+        return Array.from(this.canInteractWith);
     }
 
     public async setSpeakerNode(args: {node: SceneNode, sharedId: string}): Promise<void> {

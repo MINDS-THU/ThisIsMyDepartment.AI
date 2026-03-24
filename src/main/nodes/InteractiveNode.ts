@@ -4,8 +4,8 @@ import { BitmapFont } from "../../engine/assets/BitmapFont";
 import { ControllerFamily } from "../../engine/input/ControllerFamily";
 import { AsepriteNode, AsepriteNodeArgs } from "../../engine/scene/AsepriteNode";
 import { TextNode } from "../../engine/scene/TextNode";
-import { clamp } from "../../engine/util/math";
 import { Layer, STANDARD_FONT } from "../constants";
+import { AppLanguage, DEFAULT_LANGUAGE, getLocalizedText, readLocalizedTiledText } from "../i18n";
 import { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
 import { CharacterNode } from "./CharacterNode";
 import { PlayerNode } from "./PlayerNode";
@@ -16,13 +16,18 @@ export abstract class InteractiveNode extends AsepriteNode<ThisIsMyDepartmentApp
 
     private target: CharacterNode | null = null;
     protected caption: string;
-    private captionOpacity = 0;
     protected hideSprite = false;
     private textNode: TextNode;
+    protected interactionLabel: string;
+    protected interactionActionLabel: string;
+    protected interactionLabelByLanguage: Partial<Record<AppLanguage, string>>;
 
     public constructor(args: AsepriteNodeArgs, caption: string = "") {
         super(args);
         this.caption = caption;
+        this.interactionLabelByLanguage = readLocalizedTiledText(args.tiledObject, "label", args.tiledObject?.getName()?.trim() ?? "");
+        this.interactionLabel = getLocalizedText(DEFAULT_LANGUAGE, this.interactionLabelByLanguage, args.tiledObject?.getName()?.trim() ?? "");
+        this.interactionActionLabel = "Interact";
 
         this.textNode = new TextNode({
             font: InteractiveNode.font,
@@ -37,6 +42,36 @@ export abstract class InteractiveNode extends AsepriteNode<ThisIsMyDepartmentApp
 
     public setCaption(caption: string): void {
         this.caption = caption;
+    }
+
+    public setInteractionLabel(label: string): void {
+        this.interactionLabel = label.trim();
+        this.interactionLabelByLanguage = {
+            en: this.interactionLabel,
+            zh: this.interactionLabel
+        };
+    }
+
+    public setInteractionLabels(labels: Partial<Record<AppLanguage, string>>): void {
+        this.interactionLabelByLanguage = labels;
+        this.interactionLabel = this.getInteractionLabel(this.getActiveLanguage());
+    }
+
+    public setInteractionActionLabel(actionLabel: string): void {
+        this.interactionActionLabel = actionLabel.trim();
+    }
+
+    public getInteractionLabel(language?: AppLanguage): string {
+        const effectiveLanguage = language ?? this.getActiveLanguage();
+        return getLocalizedText(effectiveLanguage, this.interactionLabelByLanguage, this.interactionLabel);
+    }
+
+    protected getActiveLanguage(): AppLanguage {
+        return this.getScene()?.game.getLanguage() ?? DEFAULT_LANGUAGE;
+    }
+
+    public getInteractionActionLabel(): string {
+        return this.interactionActionLabel;
     }
 
     protected getRange(): number {
@@ -55,15 +90,8 @@ export abstract class InteractiveNode extends AsepriteNode<ThisIsMyDepartmentApp
             }
         }
         this.setTarget(target);
-
-        if (this.target) {
-            this.captionOpacity = clamp(this.captionOpacity + dt * 2, 0, 1);
-        } else {
-            this.captionOpacity = clamp(this.captionOpacity - dt * 2, 0, 1);
-        }
-
-        this.textNode.setOpacity(this.captionOpacity);
-        this.textNode.setText(this.captionOpacity > 0 ? this.caption : "");
+        this.textNode.setOpacity(0);
+        this.textNode.setText("");
         super.update(dt, time);
     }
 

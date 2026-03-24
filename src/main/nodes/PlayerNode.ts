@@ -127,25 +127,28 @@ export class PlayerNode extends CharacterNode {
         if (this.canInteract(ControllerIntent.PLAYER_ACTION) || this.leftMouseDown) {
             this.leftMouseDown = false;
         }
+        if (this.getGame().isInteractionChooserOpen()) {
+            if (this.canInteract(ControllerIntent.MENU_UP)) {
+                this.getGame().navigateInteractionChooser(-1);
+            }
+            if (this.canInteract(ControllerIntent.MENU_DOWN)) {
+                this.getGame().navigateInteractionChooser(1);
+            }
+            if (this.canInteract(ControllerIntent.PLAYER_INTERACT) || this.canInteract(ControllerIntent.CONFIRM)) {
+                this.getGame().confirmInteractionChoice();
+            }
+            if (this.canInteract(ControllerIntent.ABORT)) {
+                this.getGame().closeInteractionChooser();
+            }
+            this.updatePreviouslyPressed();
+            return;
+        }
         // Interact
         if (this.canInteract(ControllerIntent.PLAYER_INTERACT)) {
-            const node = this.getNodeToInteractWith();
-            this.pushInteractionDebug("player_canInteract", {
-                hasNode: !!node,
-                nodeType: node?.constructor?.name ?? null
+            const handled = this.getGame().handlePlayerInteract();
+            this.pushInteractionDebug("player_handleInteraction", {
+                handled
             });
-            if (node) {
-                node.interact();
-            } else {
-                const nearbyPlayer = this.getGame().findNearbyOtherPlayer();
-                this.pushInteractionDebug("player_nearbyPlayerCheck", {
-                    hasNearbyPlayer: !!nearbyPlayer,
-                    nearbyPlayerId: nearbyPlayer?.getIdentifier() ?? null
-                });
-                if (nearbyPlayer) {
-                    this.getGame().startPlayerConversation(nearbyPlayer.getIdentifier() as string, nearbyPlayer.getDisplayName());
-                }
-            }
         }
         // Interact
         if (this.canInteract(ControllerIntent.ABORT)) {

@@ -301,7 +301,7 @@ export class TextNode<T extends Game = Game> extends SceneNode<T> {
     }
 
     private static getDefaultFallbackFont(): string {
-        return "16px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
+        return "16px 'SF Pro Text', 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif";
     }
 
     private wrapFallbackText(text: string, ctx: CanvasRenderingContext2D): string[] {

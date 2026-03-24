@@ -1,7 +1,8 @@
 import { getStoredMediaDevicePreference } from "../constants";
+import { AppLanguage, getCodeFontStack, getUiFontStack, translate } from "../i18n";
 import { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
 
-type SettingsTabId = "media" | "character" | "ai-prompt";
+type SettingsTabId = "media" | "language" | "character" | "ai-prompt";
 type MediaDeviceKind = "audioinput" | "audiooutput" | "videoinput";
 
 interface MediaDeviceOption {
@@ -12,31 +13,18 @@ interface MediaDeviceOption {
 
 interface SettingsOverlayOpenArgs {
     initialTab?: SettingsTabId;
+    initialLanguage: AppLanguage;
     initialSpriteIndex: number;
     initialPrompt: string;
+    initialAudioEnabled: boolean;
+    initialVideoEnabled: boolean;
     getMediaDevices: () => Promise<MediaDeviceOption[]>;
     onAvatarSave: (spriteIndex: number) => Promise<void>;
     onPromptSave: (prompt: string) => Promise<void>;
+    onLanguageSave: (language: AppLanguage) => Promise<void>;
+    onMediaToggle: (kind: Extract<MediaDeviceKind, "audioinput" | "videoinput">, enabled: boolean) => Promise<boolean> | boolean;
     onMediaDeviceChange: (kind: MediaDeviceKind, deviceId: string) => Promise<void> | void;
 }
-
-const TAB_LABELS: Record<SettingsTabId, string> = {
-    media: "Media",
-    character: "Character",
-    "ai-prompt": "AI Prompt"
-};
-
-const TAB_DESCRIPTIONS: Record<SettingsTabId, string> = {
-    media: "Choose microphone, speaker, and camera devices using normal form controls.",
-    character: "Update your avatar appearance without waiting for first-time login.",
-    "ai-prompt": "Edit the prompt used when your own character is AI-controlled while you are offline."
-};
-
-const DEVICE_KIND_LABELS: Record<MediaDeviceKind, string> = {
-    audioinput: "Microphone",
-    audiooutput: "Speaker",
-    videoinput: "Camera"
-};
 
 const OVERLAY_Z_INDEX = "10000";
 
@@ -44,23 +32,39 @@ export class SettingsOverlay {
     private backdrop?: HTMLDivElement;
     private panel?: HTMLDivElement;
     private content?: HTMLDivElement;
+    private sidebarTitle?: HTMLDivElement;
+    private sidebarSubtitle?: HTMLParagraphElement;
+    private closeButton?: HTMLButtonElement;
     private mediaStatus?: HTMLDivElement;
+    private languageStatus?: HTMLDivElement;
     private characterStatus?: HTMLDivElement;
     private promptStatus?: HTMLDivElement;
     private activeTab: SettingsTabId = "media";
+    private language: AppLanguage = "en";
+    private selectedLanguage: AppLanguage = "en";
     private currentArgs?: SettingsOverlayOpenArgs;
     private detachKeydown?: () => void;
     private selectedSpriteIndex = 0;
     private promptValue = "";
     private busy = false;
     private avatarPreviewCanvases: HTMLCanvasElement[] = [];
+    private mediaState = {
+        audioEnabled: false,
+        videoEnabled: false
+    };
 
     public open(args: SettingsOverlayOpenArgs): void {
         this.close();
         this.currentArgs = args;
         this.activeTab = args.initialTab ?? "media";
+        this.language = args.initialLanguage;
+        this.selectedLanguage = args.initialLanguage;
         this.selectedSpriteIndex = args.initialSpriteIndex;
         this.promptValue = args.initialPrompt;
+        this.mediaState = {
+            audioEnabled: args.initialAudioEnabled,
+            videoEnabled: args.initialVideoEnabled
+        };
 
         const backdrop = document.createElement("div");
         backdrop.style.position = "fixed";
@@ -87,7 +91,7 @@ export class SettingsOverlay {
         panel.style.background = "linear-gradient(160deg, rgba(22, 29, 44, 0.98), rgba(11, 16, 26, 0.98))";
         panel.style.boxShadow = "0 28px 90px rgba(0, 0, 0, 0.45)";
         panel.style.color = "#eef3ff";
-        panel.style.fontFamily = "'Segoe UI', sans-serif";
+        panel.style.fontFamily = getUiFontStack(this.language);
 
         const sidebar = document.createElement("div");
         sidebar.style.padding = "24px 18px";
@@ -95,32 +99,34 @@ export class SettingsOverlay {
         sidebar.style.borderRight = "1px solid rgba(164, 190, 255, 0.12)";
 
         const title = document.createElement("div");
-        title.textContent = "Settings";
+        title.textContent = this.t("settings.sidebarTitle");
         title.style.fontSize = "28px";
         title.style.fontWeight = "700";
         title.style.letterSpacing = "0.02em";
+        this.sidebarTitle = title;
 
         const subtitle = document.createElement("p");
-        subtitle.textContent = "Manage media devices, avatar appearance, and your offline AI behavior in one place.";
+        subtitle.textContent = this.t("settings.sidebarSubtitle");
         subtitle.style.margin = "10px 0 18px";
         subtitle.style.fontSize = "14px";
         subtitle.style.lineHeight = "1.5";
         subtitle.style.color = "#c3d1f3";
+        this.sidebarSubtitle = subtitle;
 
         const tabList = document.createElement("div");
         tabList.style.display = "grid";
         tabList.style.gap = "10px";
 
-        (["media", "character", "ai-prompt"] as SettingsTabId[]).forEach(tabId => {
+        (["media", "language", "character", "ai-prompt"] as SettingsTabId[]).forEach(tabId => {
             const tabButton = document.createElement("button");
             tabButton.type = "button";
-            tabButton.textContent = TAB_LABELS[tabId];
+            tabButton.textContent = this.getTabLabel(tabId);
             tabButton.style.border = "1px solid rgba(164, 190, 255, 0.18)";
             tabButton.style.borderRadius = "14px";
             tabButton.style.padding = "14px 16px";
             tabButton.style.textAlign = "left";
             tabButton.style.cursor = "pointer";
-            tabButton.style.font = "600 15px 'Segoe UI', sans-serif";
+            tabButton.style.font = `600 15px ${getUiFontStack(this.language)}`;
             tabButton.style.color = "#eef3ff";
             tabButton.style.background = tabId === this.activeTab
                 ? "linear-gradient(135deg, rgba(72, 126, 255, 0.34), rgba(35, 86, 204, 0.22))"
@@ -139,13 +145,13 @@ export class SettingsOverlay {
 
         const closeButton = document.createElement("button");
         closeButton.type = "button";
-        closeButton.textContent = "Close";
+        closeButton.textContent = this.t("common.close");
         closeButton.style.marginTop = "18px";
         closeButton.style.border = "1px solid rgba(164, 190, 255, 0.18)";
         closeButton.style.borderRadius = "14px";
         closeButton.style.padding = "12px 16px";
         closeButton.style.cursor = "pointer";
-        closeButton.style.font = "600 14px 'Segoe UI', sans-serif";
+        closeButton.style.font = `600 14px ${getUiFontStack(this.language)}`;
         closeButton.style.background = "rgba(255, 255, 255, 0.05)";
         closeButton.style.color = "#eef3ff";
         closeButton.onclick = () => {
@@ -153,6 +159,7 @@ export class SettingsOverlay {
                 this.close();
             }
         };
+        this.closeButton = closeButton;
 
         const content = document.createElement("div");
         content.style.padding = "28px";
@@ -194,6 +201,14 @@ export class SettingsOverlay {
         this.currentArgs = undefined;
         this.busy = false;
         this.avatarPreviewCanvases = [];
+        this.mediaState = {
+            audioEnabled: false,
+            videoEnabled: false
+        };
+        this.sidebarTitle = undefined;
+        this.sidebarSubtitle = undefined;
+        this.closeButton = undefined;
+        this.languageStatus = undefined;
     }
 
     private attachEscapeListener(): () => void {
@@ -214,6 +229,7 @@ export class SettingsOverlay {
 
         this.content.innerHTML = "";
         this.mediaStatus = undefined;
+        this.languageStatus = undefined;
         this.characterStatus = undefined;
         this.promptStatus = undefined;
 
@@ -221,12 +237,12 @@ export class SettingsOverlay {
         header.style.marginBottom = "22px";
 
         const title = document.createElement("h2");
-        title.textContent = TAB_LABELS[this.activeTab];
+        title.textContent = this.getTabLabel(this.activeTab);
         title.style.margin = "0 0 8px";
         title.style.fontSize = "26px";
 
         const description = document.createElement("p");
-        description.textContent = TAB_DESCRIPTIONS[this.activeTab];
+        description.textContent = this.getTabDescription(this.activeTab);
         description.style.margin = "0";
         description.style.color = "#c3d1f3";
         description.style.lineHeight = "1.6";
@@ -245,6 +261,11 @@ export class SettingsOverlay {
             return;
         }
 
+        if (this.activeTab === "language") {
+            this.renderLanguageTab();
+            return;
+        }
+
         this.renderPromptTab();
     }
 
@@ -255,7 +276,7 @@ export class SettingsOverlay {
 
         const card = this.createCard();
         const intro = document.createElement("p");
-        intro.textContent = "Changes apply immediately. If a device label is blank, your browser has not exposed its name yet.";
+        intro.textContent = this.t("settings.media.intro");
         intro.style.margin = "0 0 18px";
         intro.style.color = "#cbd5f5";
         intro.style.lineHeight = "1.6";
@@ -270,7 +291,7 @@ export class SettingsOverlay {
         card.appendChild(status);
 
         const loading = document.createElement("div");
-        loading.textContent = "Loading media devices...";
+        loading.textContent = this.t("settings.media.loading");
         loading.style.color = "#d7e2ff";
         card.appendChild(loading);
         this.content.appendChild(card);
@@ -285,22 +306,139 @@ export class SettingsOverlay {
                 videoinput: devices.filter(device => device.kind === "videoinput")
             };
 
-            (["audioinput", "audiooutput", "videoinput"] as MediaDeviceKind[]).forEach(kind => {
-                card.appendChild(this.createMediaField(kind, groups[kind]));
-            });
+            card.appendChild(this.createMediaToggleField(
+                "videoinput",
+                this.mediaState.videoEnabled,
+                async (enabled: boolean) => {
+                    const nextState = await this.currentArgs!.onMediaToggle("videoinput", enabled);
+                    this.mediaState.videoEnabled = nextState;
+                }
+            ));
+            if (this.mediaState.videoEnabled) {
+                card.appendChild(this.createMediaField("videoinput", groups.videoinput));
+            }
 
-            const refreshButton = this.createActionButton("Refresh device list", "rgba(255, 255, 255, 0.06)", "#eef3ff");
+            card.appendChild(this.createMediaToggleField(
+                "audioinput",
+                this.mediaState.audioEnabled,
+                async (enabled: boolean) => {
+                    const nextState = await this.currentArgs!.onMediaToggle("audioinput", enabled);
+                    this.mediaState.audioEnabled = nextState;
+                }
+            ));
+            if (this.mediaState.audioEnabled) {
+                card.appendChild(this.createMediaField("audioinput", groups.audioinput));
+            }
+
+            card.appendChild(this.createMediaField("audiooutput", groups.audiooutput));
+
+            const refreshButton = this.createActionButton(this.t("settings.media.refresh"), "rgba(255, 255, 255, 0.06)", "#eef3ff");
             refreshButton.onclick = () => {
                 if (this.busy) {
                     return;
                 }
-                void this.renderMediaTab();
+                this.renderContent();
             };
             card.appendChild(refreshButton);
         } catch (error) {
-            loading.textContent = error instanceof Error ? error.message : "Media device loading failed.";
+            loading.textContent = error instanceof Error ? error.message : this.t("settings.media.loadFailed");
             loading.style.color = "#ffd0c7";
         }
+    }
+
+    private createMediaToggleField(
+        kind: Extract<MediaDeviceKind, "audioinput" | "videoinput">,
+        enabled: boolean,
+        onToggle: (enabled: boolean) => Promise<void>
+    ): HTMLDivElement {
+        const field = document.createElement("div");
+        field.style.display = "grid";
+        field.style.gap = "8px";
+        field.style.marginBottom = "18px";
+
+        const header = document.createElement("div");
+        header.style.display = "flex";
+        header.style.alignItems = "center";
+        header.style.justifyContent = "space-between";
+        header.style.gap = "12px";
+        header.style.flexWrap = "wrap";
+
+        const labelWrap = document.createElement("div");
+        labelWrap.style.display = "grid";
+        labelWrap.style.gap = "4px";
+
+        const label = document.createElement("div");
+        label.textContent = this.getDeviceKindLabel(kind);
+        label.style.fontWeight = "600";
+        label.style.fontSize = "14px";
+
+        const helper = document.createElement("div");
+        helper.textContent = enabled
+            ? this.t("settings.media.helper.enabled", { device: this.getDeviceKindLabel(kind).toLowerCase() })
+            : this.t(`settings.media.helper.enable.${kind}`);
+        helper.style.fontSize = "13px";
+        helper.style.color = "#bac7e8";
+
+        const toggleButton = this.createActionButton(
+            enabled ? this.t("settings.media.toggle.off") : this.t("settings.media.toggle.on"),
+            enabled ? "rgba(72, 126, 255, 0.26)" : "rgba(255, 255, 255, 0.06)",
+            "#eef3ff"
+        );
+        toggleButton.onclick = async () => {
+            if (!this.currentArgs || this.busy) {
+                return;
+            }
+
+            this.busy = true;
+            this.updateDisabledState();
+            if (this.mediaStatus) {
+                this.mediaStatus.textContent = this.t(
+                    enabled ? "settings.media.disabling" : "settings.media.enabling",
+                    { device: this.getDeviceKindLabel(kind).toLowerCase() }
+                );
+            }
+
+            try {
+                await onToggle(!enabled);
+                this.busy = false;
+                this.renderContent();
+                this.updateDisabledState();
+                if (this.mediaStatus) {
+                    this.mediaStatus.textContent = this.t(
+                        !enabled ? "settings.media.enabled" : "settings.media.disabled",
+                        { device: this.getDeviceKindLabel(kind) }
+                    );
+                }
+            } catch (error) {
+                if (this.mediaStatus) {
+                    this.mediaStatus.textContent = error instanceof Error
+                        ? error.message
+                        : this.t("settings.media.toggleFailed", { device: this.getDeviceKindLabel(kind) });
+                }
+                this.busy = false;
+                this.updateDisabledState();
+            }
+        };
+
+        labelWrap.appendChild(label);
+        labelWrap.appendChild(helper);
+        header.appendChild(labelWrap);
+        header.appendChild(toggleButton);
+        field.appendChild(header);
+
+        if (!enabled) {
+            const disabledState = document.createElement("div");
+            disabledState.textContent = this.t(`settings.media.hidden.${kind}`);
+            disabledState.style.padding = "12px 14px";
+            disabledState.style.borderRadius = "12px";
+            disabledState.style.border = "1px dashed rgba(164, 190, 255, 0.18)";
+            disabledState.style.background = "rgba(8, 12, 20, 0.46)";
+            disabledState.style.color = "#9fb0d8";
+            disabledState.style.fontSize = "13px";
+            field.appendChild(disabledState);
+        }
+
+        return field;
     }
 
     private createMediaField(kind: MediaDeviceKind, devices: MediaDeviceOption[]): HTMLDivElement {
@@ -308,33 +446,35 @@ export class SettingsOverlay {
         field.style.display = "grid";
         field.style.gap = "8px";
         field.style.marginBottom = "18px";
+        const supportsAudioOutputSelection = this.supportsAudioOutputSelection();
+        const audioOutputUnsupported = kind === "audiooutput" && !supportsAudioOutputSelection;
 
         const label = document.createElement("label");
-        label.textContent = DEVICE_KIND_LABELS[kind];
+        label.textContent = this.getDeviceKindLabel(kind);
         label.style.fontWeight = "600";
         label.style.fontSize = "14px";
 
         const helper = document.createElement("div");
         helper.textContent = kind === "audiooutput"
-            ? "Speaker output support depends on the browser."
-            : `Select the ${DEVICE_KIND_LABELS[kind].toLowerCase()} used for this room.`;
+            ? this.t(audioOutputUnsupported ? "settings.media.helper.audiooutputUnsupported" : "settings.media.helper.audiooutput")
+            : this.t("settings.media.helper.default", { device: this.getDeviceKindLabel(kind).toLowerCase() });
         helper.style.fontSize = "13px";
         helper.style.color = "#bac7e8";
 
         const select = document.createElement("select");
-        select.disabled = this.busy || devices.length === 0;
+        select.disabled = this.busy || devices.length === 0 || audioOutputUnsupported;
         select.style.width = "100%";
         select.style.padding = "12px 14px";
         select.style.borderRadius = "12px";
         select.style.border = "1px solid rgba(164, 190, 255, 0.2)";
         select.style.background = "rgba(8, 12, 20, 0.72)";
         select.style.color = "#eef3ff";
-        select.style.font = "14px 'Segoe UI', sans-serif";
+        select.style.font = `14px ${getUiFontStack(this.language)}`;
 
         if (devices.length === 0) {
             const option = document.createElement("option");
             option.value = "";
-            option.textContent = "No devices available";
+            option.textContent = this.t(audioOutputUnsupported ? "settings.media.noAudioOutputSupport" : "settings.media.noDevices");
             select.appendChild(option);
         } else {
             const selectedDeviceId = getStoredMediaDevicePreference(localStorage, this.mapDeviceKindToPreferenceKey(kind));
@@ -357,16 +497,16 @@ export class SettingsOverlay {
             this.busy = true;
             this.updateDisabledState();
             if (this.mediaStatus) {
-                this.mediaStatus.textContent = `Applying ${DEVICE_KIND_LABELS[kind].toLowerCase()}...`;
+                this.mediaStatus.textContent = this.t("settings.media.applying", { device: this.getDeviceKindLabel(kind).toLowerCase() });
             }
             try {
                 await this.currentArgs.onMediaDeviceChange(kind, select.value);
                 if (this.mediaStatus) {
-                    this.mediaStatus.textContent = `${DEVICE_KIND_LABELS[kind]} updated.`;
+                    this.mediaStatus.textContent = this.t("settings.media.updated", { device: this.getDeviceKindLabel(kind) });
                 }
             } catch (error) {
                 if (this.mediaStatus) {
-                    this.mediaStatus.textContent = error instanceof Error ? error.message : `${DEVICE_KIND_LABELS[kind]} update failed.`;
+                    this.mediaStatus.textContent = error instanceof Error ? error.message : this.t("settings.media.updateFailed", { device: this.getDeviceKindLabel(kind) });
                 }
             } finally {
                 this.busy = false;
@@ -380,6 +520,106 @@ export class SettingsOverlay {
         return field;
     }
 
+    private supportsAudioOutputSelection(): boolean {
+        return typeof HTMLMediaElement !== "undefined"
+            && "setSinkId" in HTMLMediaElement.prototype;
+    }
+
+    private renderLanguageTab(): void {
+        if (!this.content || !this.currentArgs) {
+            return;
+        }
+
+        const card = this.createCard();
+        const intro = document.createElement("p");
+        intro.textContent = this.t("settings.language.intro");
+        intro.style.margin = "0 0 18px";
+        intro.style.color = "#cbd5f5";
+        intro.style.lineHeight = "1.6";
+        card.appendChild(intro);
+
+        const field = document.createElement("div");
+        field.style.display = "grid";
+        field.style.gap = "8px";
+
+        const label = document.createElement("label");
+        label.textContent = this.t("settings.language.label");
+        label.style.fontWeight = "600";
+        label.style.fontSize = "14px";
+
+        const helper = document.createElement("div");
+        helper.textContent = this.t("settings.language.helper");
+        helper.style.fontSize = "13px";
+        helper.style.color = "#bac7e8";
+
+        const select = document.createElement("select");
+        select.value = this.selectedLanguage;
+        select.style.width = "100%";
+        select.style.padding = "12px 14px";
+        select.style.borderRadius = "12px";
+        select.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        select.style.background = "rgba(8, 12, 20, 0.72)";
+        select.style.color = "#eef3ff";
+        select.style.font = `14px ${getUiFontStack(this.language)}`;
+        (["en", "zh"] as AppLanguage[]).forEach(language => {
+            const option = document.createElement("option");
+            option.value = language;
+            option.textContent = this.t(`language.option.${language}`);
+            select.appendChild(option);
+        });
+        select.onchange = () => {
+            this.selectedLanguage = select.value as AppLanguage;
+        };
+
+        field.appendChild(label);
+        field.appendChild(helper);
+        field.appendChild(select);
+        card.appendChild(field);
+
+        const status = document.createElement("div");
+        status.style.minHeight = "22px";
+        status.style.margin = "18px 0 0";
+        status.style.color = "#d7e2ff";
+        status.style.fontSize = "13px";
+        this.languageStatus = status;
+        card.appendChild(status);
+
+        const actions = document.createElement("div");
+        actions.style.display = "flex";
+        actions.style.gap = "10px";
+        actions.style.marginTop = "18px";
+
+        const saveButton = this.createActionButton(this.t("settings.language.save"), "rgba(72, 126, 255, 0.26)", "#eef3ff");
+        saveButton.onclick = async () => {
+            if (!this.currentArgs || this.busy) {
+                return;
+            }
+            this.busy = true;
+            this.updateDisabledState();
+            if (this.languageStatus) {
+                this.languageStatus.textContent = this.t("settings.language.saving");
+            }
+            try {
+                await this.currentArgs.onLanguageSave(this.selectedLanguage);
+                this.applyOverlayLanguage(this.selectedLanguage);
+                if (this.languageStatus) {
+                    this.languageStatus.textContent = this.t("settings.language.saved");
+                }
+            } catch (error) {
+                if (this.languageStatus) {
+                    this.languageStatus.textContent = error instanceof Error ? error.message : this.t("settings.language.failed");
+                }
+            } finally {
+                this.busy = false;
+                this.updateDisabledState();
+            }
+        };
+
+        actions.appendChild(saveButton);
+        card.appendChild(actions);
+        this.content.appendChild(card);
+    }
+
     private renderCharacterTab(): void {
         if (!this.content || !this.currentArgs) {
             return;
@@ -387,7 +627,7 @@ export class SettingsOverlay {
 
         const card = this.createCard();
         const intro = document.createElement("p");
-        intro.textContent = "Pick a character appearance and save it. The change is stored in your profile and applied in the room immediately.";
+        intro.textContent = this.t("settings.character.intro");
         intro.style.margin = "0 0 18px";
         intro.style.color = "#cbd5f5";
         intro.style.lineHeight = "1.6";
@@ -438,8 +678,8 @@ export class SettingsOverlay {
             previewFrame.appendChild(previewCanvas);
 
             const caption = document.createElement("div");
-            caption.textContent = `Avatar ${spriteIndex + 1}`;
-            caption.style.font = "600 14px 'Segoe UI', sans-serif";
+            caption.textContent = this.t("settings.character.avatar", { index: spriteIndex + 1 });
+            caption.style.font = `600 14px ${getUiFontStack(this.language)}`;
             caption.style.letterSpacing = "0.02em";
 
             cardButton.onclick = () => {
@@ -468,7 +708,7 @@ export class SettingsOverlay {
         actions.style.marginTop = "18px";
         actions.style.flexWrap = "wrap";
 
-        const saveButton = this.createActionButton("Save avatar", "rgba(72, 126, 255, 0.26)", "#eef3ff");
+        const saveButton = this.createActionButton(this.t("settings.character.save"), "rgba(72, 126, 255, 0.26)", "#eef3ff");
         saveButton.onclick = async () => {
             if (!this.currentArgs || this.busy) {
                 return;
@@ -476,16 +716,16 @@ export class SettingsOverlay {
             this.busy = true;
             this.updateDisabledState();
             if (this.characterStatus) {
-                this.characterStatus.textContent = "Saving avatar...";
+                this.characterStatus.textContent = this.t("settings.character.saving");
             }
             try {
                 await this.currentArgs.onAvatarSave(this.selectedSpriteIndex);
                 if (this.characterStatus) {
-                    this.characterStatus.textContent = "Avatar updated.";
+                    this.characterStatus.textContent = this.t("settings.character.saved");
                 }
             } catch (error) {
                 if (this.characterStatus) {
-                    this.characterStatus.textContent = error instanceof Error ? error.message : "Avatar update failed.";
+                    this.characterStatus.textContent = error instanceof Error ? error.message : this.t("settings.character.failed");
                 }
             } finally {
                 this.busy = false;
@@ -507,7 +747,7 @@ export class SettingsOverlay {
 
         const card = this.createCard();
         const intro = document.createElement("p");
-        intro.textContent = "This prompt controls how your own character behaves when the system needs to act for you while you are offline.";
+        intro.textContent = this.t("settings.prompt.intro");
         intro.style.margin = "0 0 16px";
         intro.style.color = "#cbd5f5";
         intro.style.lineHeight = "1.6";
@@ -516,7 +756,7 @@ export class SettingsOverlay {
         const textarea = document.createElement("textarea");
         textarea.value = this.promptValue;
         textarea.rows = 12;
-        textarea.placeholder = "Describe how your character should speak, help others, use prior context, and behave when AI-controlled.";
+        textarea.placeholder = this.t("settings.prompt.placeholder");
         textarea.style.width = "100%";
         textarea.style.boxSizing = "border-box";
         textarea.style.padding = "14px";
@@ -524,7 +764,7 @@ export class SettingsOverlay {
         textarea.style.border = "1px solid rgba(164, 190, 255, 0.2)";
         textarea.style.background = "rgba(8, 12, 20, 0.72)";
         textarea.style.color = "#eef3ff";
-        textarea.style.font = "14px/1.6 'SFMono-Regular', Consolas, monospace";
+        textarea.style.font = `14px/1.6 ${getCodeFontStack(this.language)}`;
         textarea.style.resize = "vertical";
         textarea.style.minHeight = "260px";
         textarea.oninput = () => {
@@ -544,14 +784,14 @@ export class SettingsOverlay {
         actions.style.marginTop = "18px";
         actions.style.flexWrap = "wrap";
 
-        const clearButton = this.createActionButton("Clear prompt", "rgba(255, 194, 111, 0.12)", "#ffe1b1");
+        const clearButton = this.createActionButton(this.t("settings.prompt.clear"), "rgba(255, 194, 111, 0.12)", "#ffe1b1");
         clearButton.onclick = async () => {
             textarea.value = "";
             this.promptValue = "";
             await this.savePromptValue("");
         };
 
-        const saveButton = this.createActionButton("Save prompt", "rgba(72, 126, 255, 0.26)", "#eef3ff");
+        const saveButton = this.createActionButton(this.t("settings.prompt.save"), "rgba(72, 126, 255, 0.26)", "#eef3ff");
         saveButton.onclick = async () => {
             await this.savePromptValue(textarea.value.trim());
         };
@@ -571,17 +811,17 @@ export class SettingsOverlay {
         this.busy = true;
         this.updateDisabledState();
         if (this.promptStatus) {
-            this.promptStatus.textContent = "Saving prompt...";
+            this.promptStatus.textContent = this.t("settings.prompt.saving");
         }
         try {
             await this.currentArgs.onPromptSave(prompt);
             this.promptValue = prompt;
             if (this.promptStatus) {
-                this.promptStatus.textContent = prompt.length > 0 ? "Prompt updated." : "Prompt cleared.";
+                this.promptStatus.textContent = prompt.length > 0 ? this.t("settings.prompt.saved") : this.t("settings.prompt.cleared");
             }
         } catch (error) {
             if (this.promptStatus) {
-                this.promptStatus.textContent = error instanceof Error ? error.message : "Prompt save failed.";
+                this.promptStatus.textContent = error instanceof Error ? error.message : this.t("settings.prompt.failed");
             }
         } finally {
             this.busy = false;
@@ -596,11 +836,23 @@ export class SettingsOverlay {
         const buttons = this.panel.querySelectorAll<HTMLButtonElement>("button[data-settings-tab]");
         buttons.forEach(button => {
             const tabId = button.dataset.settingsTab as SettingsTabId;
+            button.textContent = this.getTabLabel(tabId);
+            button.style.font = `600 15px ${getUiFontStack(this.language)}`;
             button.style.background = tabId === this.activeTab
                 ? "linear-gradient(135deg, rgba(72, 126, 255, 0.34), rgba(35, 86, 204, 0.22))"
                 : "rgba(255, 255, 255, 0.04)";
             button.disabled = this.busy;
         });
+        if (this.sidebarTitle) {
+            this.sidebarTitle.textContent = this.t("settings.sidebarTitle");
+        }
+        if (this.sidebarSubtitle) {
+            this.sidebarSubtitle.textContent = this.t("settings.sidebarSubtitle");
+        }
+        if (this.closeButton) {
+            this.closeButton.textContent = this.t("common.close");
+            this.closeButton.style.font = `600 14px ${getUiFontStack(this.language)}`;
+        }
     }
 
     private updateDisabledState(): void {
@@ -649,10 +901,54 @@ export class SettingsOverlay {
         button.style.borderRadius = "12px";
         button.style.padding = "11px 16px";
         button.style.cursor = "pointer";
-        button.style.font = "600 14px 'Segoe UI', sans-serif";
+        button.style.font = `600 14px ${getUiFontStack(this.language)}`;
         button.style.background = background;
         button.style.color = color;
         return button;
+    }
+
+    private applyOverlayLanguage(language: AppLanguage): void {
+        this.language = language;
+        this.selectedLanguage = language;
+        if (this.panel) {
+            this.panel.style.fontFamily = getUiFontStack(this.language);
+        }
+        this.renderContent();
+        this.refreshTabButtonStates();
+    }
+
+    private getTabLabel(tabId: SettingsTabId): string {
+        switch (tabId) {
+            case "media":
+                return this.t("settings.tab.media");
+            case "language":
+                return this.t("settings.tab.language");
+            case "character":
+                return this.t("settings.tab.character");
+            default:
+                return this.t("settings.tab.aiPrompt");
+        }
+    }
+
+    private getTabDescription(tabId: SettingsTabId): string {
+        switch (tabId) {
+            case "media":
+                return this.t("settings.description.media");
+            case "language":
+                return this.t("settings.description.language");
+            case "character":
+                return this.t("settings.description.character");
+            default:
+                return this.t("settings.description.aiPrompt");
+        }
+    }
+
+    private getDeviceKindLabel(kind: MediaDeviceKind): string {
+        return this.t(`settings.media.${kind}`);
+    }
+
+    private t(key: string, params?: Record<string, string | number>): string {
+        return translate(this.language, key, params);
     }
 
     private drawAvatarPreview(canvas: HTMLCanvasElement, spriteIndex: number): void {

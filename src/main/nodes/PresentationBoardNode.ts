@@ -93,7 +93,8 @@ export class PresentationBoardNode extends AsepriteNode<ThisIsMyDepartmentApp> {
             this.slideIndex = clamp(this.slideIndex + 1, 0, this.presentationData.length - 1);
             this.currentLine = this.presentationData[this.slideIndex];
             this.updateSlide();
-            this.getGame().sendCommand("presentationUpdate", { presentationBoardId: this.boardId, slide: this.slideIndex });
+            this.getGame().updateLocalPresentationSlide(this.boardId ?? 0, this.slideIndex);
+            this.getGame().sendRealtimeCommand("presentationUpdate", { presentationBoardId: this.boardId, slide: this.slideIndex });
         }
     }
 
@@ -102,7 +103,8 @@ export class PresentationBoardNode extends AsepriteNode<ThisIsMyDepartmentApp> {
             this.slideIndex = clamp(this.slideIndex - 1, 0, this.slideIndex);
             this.currentLine = this.presentationData[this.slideIndex];
             this.updateSlide();
-            this.getGame().sendCommand("presentationUpdate", { presentationBoardId: this.boardId, slide: this.slideIndex });
+            this.getGame().updateLocalPresentationSlide(this.boardId ?? 0, this.slideIndex);
+            this.getGame().sendRealtimeCommand("presentationUpdate", { presentationBoardId: this.boardId, slide: this.slideIndex });
         }
     }
 
@@ -112,6 +114,10 @@ export class PresentationBoardNode extends AsepriteNode<ThisIsMyDepartmentApp> {
             this.currentLine = this.presentationData[this.slideIndex];
             this.updateSlide();
         }
+    }
+
+    public isPresentationActive(): boolean {
+        return this.getTag() === PresentationBoardTags.OUT || this.getTag() === PresentationBoardTags.ROLL_OUT;
     }
 
     private updateSlide(): void {
