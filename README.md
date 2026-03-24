@@ -1,7 +1,9 @@
 # ThisIsMyDepartment.AI
 
 ThisIsMyDepartment.AI is a self-hostable virtual department environment for teams, labs, schools, and organizations that want identity-aware avatars, shared spaces, and AI-controlled characters in one deployable app.
-It started from a customized Gather-style environment and is being refactored into a reusable open-source platform with a backend for identity, persistence, and LLM orchestration.
+The project originated as a customized Gather-style environment, adapted from the open-source clone (https://github.com/eweren/gather.town), and initially served as a homepage interface for accessing external LLM agent applications via embedded iframes. 
+
+It is now being refactored into a modular, reusable open-source platform, with a backend that supports identity management, persistent state, and in-environment LLM-driven characters—where user avatars can be autonomously operated by LLM agents in their absence to continue conversations and represent their roles.
 
 ![ThisIsMyDepartment.AI demo](resource/ShundeBuilding_demo_v2.png)
 
