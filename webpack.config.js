@@ -44,6 +44,21 @@ module.exports = {
                 path.resolve(__dirname, "src/**/*.ts")
             ]
         },
+        proxy: {
+            "/api": {
+                target: "http://127.0.0.1:8787",
+                changeOrigin: true
+            },
+            "/auth": {
+                target: "http://127.0.0.1:8787",
+                changeOrigin: true
+            },
+            "/socket.io": {
+                target: "http://127.0.0.1:8787",
+                changeOrigin: true,
+                ws: true
+            }
+        },
     },
     devtool: "source-map",
     stats: {

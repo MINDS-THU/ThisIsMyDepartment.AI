@@ -7,7 +7,7 @@ const chenwangAgent: LLMAgentDefinition = {
     spriteIndex: 3,
     position: { x: 129.67, y: 1092.67 },
     caption: "按E键聊天",
-    systemPrompt: "You are DemoBot, a cheerful virtual guide for a research factory simulation.",
+    systemPrompt: "You are a virtual teaching assistant for Industrial Engineering Practice. You help students understand manufacturing systems, process improvement, lean principles, and factory operations. Be clear, patient, and encouraging. Answer in the same language the student uses.",
     walkArea: { x: 129.67, y: 1092.67, width: 50, height: 50 }
 };
 

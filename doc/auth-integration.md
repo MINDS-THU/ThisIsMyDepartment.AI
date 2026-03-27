@@ -1,21 +1,25 @@
-# ThisIsMyDepartment.AI Auth Integration Guide
+# Auth Integration Guide
 
-This document explains how a host institution can connect its existing login system to the backend in this repository.
+This document explains how to connect an existing login system to the ThisIsMyDepartment.AI backend.
 
 ## Choose your login mode
 
 Pick one primary mode based on where trust already exists in your deployment:
 
-1. Shared-secret POST handoff: best when your upstream website or adapter service can make a trusted request directly to this backend.
-2. JWT handoff: best when your upstream system already issues HS256 tokens and you want the backend to verify them.
-3. Reverse-proxy headers: best when SSO terminates at Nginx, Apache, Traefik, or a campus gateway in front of the backend.
-4. `postMessage` bridge: best when the app is embedded in another portal or login must complete in a popup.
+| Mode | Best for | Backend variable |
+|------|----------|------------------|
+| **Shared-secret POST** | Server-to-server handoff from your upstream site | `AUTH_HANDOFF_SHARED_SECRET` |
+| **JWT** | Upstream site already issues HS256 tokens | `AUTH_JWT_SHARED_SECRET` |
+| **Reverse-proxy headers** | SSO terminates at Nginx, Apache, or a campus gateway | `AUTH_PROXY_*` variables |
+| **postMessage bridge** | App embedded in an iframe or login via popup | `AUTH_POSTMESSAGE_ALLOWED_ORIGINS` |
+| **Insecure dev fallback** | Local development only | `AUTH_ALLOW_INSECURE_DEV_HANDOFF=true` (default) |
 
 Practical recommendation:
 
-* start from [server/.env.production.example](server/.env.production.example)
+* start from [server/.env.production.example](../server/.env.production.example)
 * configure only the variables needed for your chosen auth mode
-* keep the institution-specific verification logic in a small upstream adapter instead of modifying the browser client
+* set `AUTH_ALLOW_INSECURE_DEV_HANDOFF=false` in production
+* keep institution-specific verification logic in a small upstream adapter instead of modifying the browser client
 
 ## Minimum operator checklist
 
@@ -330,3 +334,41 @@ Or on failure:
 ## Current naming cleanup status
 
 Public-facing branding now uses ThisIsMyDepartment.AI. The core runtime class has been renamed to `ThisIsMyDepartmentApp`, the live browser entry is [src/main/ThisIsMyDepartmentApp.ts](src/main/ThisIsMyDepartmentApp.ts), and the default shared room names and browser media preference keys now use ThisIsMyDepartment.AI-specific values.
+
+## Insecure dev fallback
+
+For local development, the backend includes a built-in login page at `/auth/login` that accepts unsigned form submissions. This mode is controlled by:
+
+```sh
+AUTH_ALLOW_INSECURE_DEV_HANDOFF=true    # default
+```
+
+When enabled, the user can fill in display name, external ID, and other fields directly on the login form without any shared secret, JWT, or proxy header validation.
+
+**This mode must be disabled in production** by setting `AUTH_ALLOW_INSECURE_DEV_HANDOFF=false`. It exists only to make local development and testing possible without configuring a real auth provider.
+
+## Security Notes
+
+### postMessage origin validation
+
+The `AUTH_POSTMESSAGE_ALLOWED_ORIGINS` variable controls which parent origins can send auth messages to the bridge page. If this list is empty, the bridge rejects all messages. In production:
+
+* list only the specific origins that should be allowed (e.g., `https://portal.example.edu`)
+* never use `*` as an allowed origin in production
+* validate that the origins match your actual embedding site
+
+### Reverse-proxy header trust
+
+When using reverse-proxy auth mode, the backend trusts whatever headers arrive in the request. Your reverse proxy must:
+
+* strip any client-supplied copies of the auth headers before forwarding
+* inject the correct values from your SSO layer
+* never expose the `/auth/proxy-login` endpoint without the proxy in front of it
+
+### Cookie security
+
+The session cookie is set with `HttpOnly` and `SameSite=Lax` by default. In production behind TLS, ensure your reverse proxy forwards `X-Forwarded-Proto: https` so browsers treat the cookie appropriately.
+
+### Secret rotation
+
+Rotate `AUTH_HANDOFF_SHARED_SECRET` and `AUTH_JWT_SHARED_SECRET` periodically. Existing sessions remain valid until they expire (controlled by `AUTH_SESSION_TTL_SECONDS`), but new handoffs will require the updated secret.

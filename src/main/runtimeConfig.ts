@@ -53,11 +53,7 @@ export const getRealtimeSocketBaseUrl = (): string => {
     }
 
     const currentOrigin = stripTrailingSlash(window.location.origin);
-    if (window.location.port && window.location.port !== "8000") {
-        return ensureTrailingSlash(currentOrigin);
-    }
-
-    return ensureTrailingSlash(`${getDefaultProtocol()}//${getDefaultHostname()}:8787`);
+    return ensureTrailingSlash(currentOrigin);
 };
 
 export const getBackendBaseCandidates = (): string[] => {
@@ -70,11 +66,7 @@ export const getBackendBaseCandidates = (): string[] => {
         candidates.push(stripTrailingSlash(configured));
     }
 
-    if (window.location.port === "8000") {
-        candidates.push(localBackend, sameOrigin);
-    } else {
-        candidates.push(sameOrigin, localBackend);
-    }
+    candidates.push(sameOrigin, localBackend);
 
     return Array.from(new Set(candidates));
 };

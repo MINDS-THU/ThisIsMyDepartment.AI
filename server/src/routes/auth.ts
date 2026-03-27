@@ -241,9 +241,9 @@ const renderLoginPage = (request: IncomingMessage): string => {
     <form method="post" action="/auth/handoff">
       <input type="hidden" name="returnTo" value="${returnTo.replace(/"/g, "&quot;")}" />
       <label>Provider<input name="externalProvider" value="local-dev" required /></label>
-      <label>External ID<input name="externalId" value="demo-user" required /></label>
-      <label>Display Name<input name="displayName" value="Demo User" required /></label>
-      <label>Email<input name="email" value="demo@example.com" /></label>
+      <label>External ID<input name="externalId" value="test-user" required /></label>
+      <label>Display Name<input name="displayName" value="Test User" required /></label>
+      <label>Email<input name="email" value="test@localhost" /></label>
     <label>Organization<input name="organization" value="${escapeHtml(config.defaultOrganizationName)}" /></label>
     <label>Department<input name="department" value="${escapeHtml(config.defaultDepartmentName)}" /></label>
       <label>Roles (comma separated)<input name="roles" value="member" /></label>

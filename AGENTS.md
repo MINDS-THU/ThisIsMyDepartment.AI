@@ -1,17 +1,189 @@
-# Project Brief
+# AGENTS.md
 
-This project serves as the entry point for various LLM agent services in my department. It is modified from <https://github.com/eweren/gather.town>.
+This file is for coding agents working in `THUShundeBuilding.AI` / `ThisIsMyDepartment.AI`.
 
-I want to conduct a complete cleanup and overhaul of this project, then release it as an open-source project for people who want to build such a virtual environment for their department. I want to rename the project to ThisIsMyDepartment.AI.
+## Project overview
 
-There are a couple of things that we need to make clear and work on.
+- Legacy TypeScript browser client plus a small TypeScript backend.
+- Frontend is a Gather-style virtual environment with avatars, rooms, Jitsi, chat, and embedded tools.
+- Backend owns auth handoff, profile storage, activity logging, conversation storage, AI-agent chat routing, and realtime sync.
+- The repo is mid-migration from a customized internal app toward a reusable open-source project.
+- Prefer existing local patterns over introducing a brand-new architecture.
 
-1. We need a login and identity management method that is easy to use for other people who want to host their own services.
+## Repository layout
 
-When other people host this, their users will probably jump from some other website that has already handled login. Then our app will need to get that identity information via POST. I think every company or university will have a different way to identify users. I am wondering if there is a generic and easy-to-use way so that other people can easily set up the service for their own department.
+- `src/`: frontend TypeScript sources.
+- `src/main/`: app logic, game scenes, overlays, agent definitions, frontend services.
+- `src/engine/`: reusable engine primitives.
+- `src/test/`: frontend/unit test sources in TypeScript.
+- `lib/`: compiled frontend JavaScript output; generated.
+- `server/src/`: backend TypeScript sources.
+- `server/dist/`: compiled backend output; generated.
+- `scripts/`: utility scripts such as agent registry generation and realtime smoke tests.
+- `assets/`, `resource/`, `doc/`: static assets and docs.
 
-1. After logging in, each user should have a unique ID. For the user who logs in for the first time, they should enter a window where they can customize what the character looks like. This functionality was implemented in the original project and was disabled by me in later developments. Now I want you to fix this.
+## Cursor / Copilot rules
 
-1. All the activities of the user should be saved and associated with their unique ID. In this app, such activities include chatting with other user-controlled characters, chatting with AI characters, and opening links in the iframe.
+- No `.cursor/rules/` directory exists.
+- No `.cursorrules` file exists.
+- No `.github/copilot-instructions.md` file exists.
+- There are no extra Cursor/Copilot instructions to merge beyond this file.
 
-1. Currently, the only AI-controlled characters are the teacher characters in AgentDefinition.ts, chenwang.agent.ts, and chuanhao.agent.ts. To use them, we need to launch some Python script that handles the call to the LLM. I want to change this so that we do not need to launch separate services. Instead, our app will directly call the LLM. The context of the AI-controlled character will include the previously recorded activities and dialogues, as well as a system prompt. The users should be able to edit their own system prompt.
+## Environment and toolchain
+
+- Use Node `16.20.2` at the repo root; it is pinned with Volta.
+- Root `npm install` also installs backend dependencies via `postinstall`.
+- Frontend stack: legacy Webpack + TypeScript + Jest.
+- Backend stack: plain TypeScript compiled to CommonJS and run with Node.
+- `better-sqlite3` may need local native rebuild support on macOS.
+
+## Core commands
+
+### Build
+
+- `npm install` - install root and backend dependencies.
+- `npm run clean` - remove generated outputs.
+- `npm run compile` - compile frontend TypeScript to `lib/`.
+- `npm run watch` - watch frontend compilation.
+- `npm run server:install` - install backend dependencies only.
+- `npm run server:build` - build backend TypeScript.
+- `npm run dist` - build browser bundle.
+- `npm run package` - package Electron app.
+- `npm run make` - create Electron distributables.
+
+### Run
+
+- `npm start` - start the frontend dev server.
+- `npm run server:start` - start compiled backend.
+- `npm run server:dev` - run backend from compiled output in `server/dist/`.
+- Recommended local flow:
+
+  1. `npm run compile`
+  2. `npm run server:build`
+  3. `npm run server:start`
+  4. `npm start`
+
+### Lint and verify
+
+- `npm run markdownlint`
+- `npm run htmlhint`
+- `npm run eslint`
+- `npm run lint` - markdown + HTML + frontend ESLint.
+- `npm run cspell`
+- `npm run check` - frontend Jest suite.
+- `npm run coverage`
+- `npm test` - cspell + lint + Jest.
+- `npm run smoke:realtime`
+
+## Test workflow
+
+- Jest runs against compiled files in `lib/test/**/*.test.js`, not raw `src/test/**/*.ts`.
+- After changing frontend code or tests, compile first with `npm run compile`.
+- Run the full frontend suite with `npm run check`.
+- Run one compiled test file with:
+  - `npm run compile && npx jest --runInBand --runTestsByPath lib/test/graphics/Vector2.test.js`
+- Run one test by name with:
+  - `npm run compile && npx jest --runInBand -t "returns the length of the vector"`
+- If you add a new test under `src/test/`, verify its compiled counterpart appears under `lib/test/` first.
+- There is no dedicated backend test script; backend changes should at least pass `npm run server:build`.
+
+## Realtime smoke test
+
+- Build backend: `npm run server:build`
+- Start a fresh backend on an open port, for example:
+  - `PORT=8789 node server/dist/server/src/app.js`
+- In another shell run:
+  - `TIMD_REALTIME_URL=http://127.0.0.1:8789 npm run smoke:realtime`
+- Prefer a fresh port so you do not accidentally validate an old process.
+
+## Generated files and source of truth
+
+- Edit TypeScript in `src/` and `server/src/`.
+- Do not hand-edit `lib/` or `server/dist/`; regenerate them.
+- `src/main/agents/registry.generated.ts` is generated by `scripts/generateAgentRegistry.js`.
+- Root `precompile`, `prewatch`, and `prestart` regenerate the frontend agent registry.
+- If you add, remove, or rename `*.agent.ts` files, rerun compile/start or run `node scripts/generateAgentRegistry.js`.
+- Keep docs aligned when behavior, commands, env vars, or architecture change.
+
+## Formatting conventions
+
+- There is no Prettier config; match surrounding formatting manually.
+- Use 4-space indentation.
+- Use double quotes.
+- Use semicolons.
+- Use 1TBS brace style.
+- Keep line length readable; ESLint does not enforce a hard max here.
+- Keep files ASCII unless the file already intentionally uses localized text or other Unicode content.
+
+## Import conventions
+
+- Keep imports at the top of the file.
+- Prefer `import type` for type-only imports.
+- Use relative imports matching nearby code; do not introduce path aliases.
+- Keep import paths explicit and stable.
+- Follow the surrounding file's grouping instead of reordering whole blocks just for style.
+- Avoid new barrel files unless the area already uses them.
+
+## TypeScript guidance
+
+- Frontend and backend both compile with `strict: true`.
+- Root TS config also enforces `noUnusedLocals` and `noImplicitReturns`.
+- Prefer explicit interfaces/types for route payloads, responses, UI state, and other boundary objects.
+- Use `interface` for object-shaped contracts that may grow.
+- Use `type` for unions, mapped types, and derived shapes.
+- Avoid `any` even though ESLint allows it; prefer `unknown` or a precise type.
+- Use non-null assertions sparingly and only when the invariant is already established nearby.
+- Reuse existing shared types before creating near-duplicates.
+
+## Naming conventions
+
+- Classes, interfaces, enums, and type aliases: `PascalCase`.
+- Functions, methods, variables, and object properties: `camelCase`.
+- Module-wide constants: `UPPER_SNAKE_CASE`.
+- Backend route handlers typically use `handleXRoute` names.
+- Frontend service helpers often use `fetchX`, `saveX`, `loadX`, `appendX`, or `configureX` names.
+- Agent definition files use `*.agent.ts` and default-export a typed definition object.
+
+## Frontend code style
+
+- Match the existing class-heavy architecture in `src/main/` and `src/engine/`.
+- Extend existing nodes, overlays, and services instead of bypassing them.
+- Prefer small helper methods when a game or UI flow becomes hard to read.
+- Keep DOM, network, and localStorage failures at the edges and log useful warnings.
+- Preserve fallback behavior when services try multiple backend endpoints.
+- Do not break localization-sensitive UI; preserve `i18n` hooks where present.
+
+## Backend code style
+
+- Keep backend modules dependency-light and close to the current standard-library style.
+- Prefer pure helpers plus thin route handlers.
+- Validate request input before mutating state.
+- Use shared helpers like `sendJson`, `sendHtml`, `redirect`, and body parsers instead of ad hoc response logic.
+- Return early on auth failure, invalid input, and unsupported routes.
+- Keep route registration explicit in `server/src/app.ts` unless there is a strong local reason to refactor.
+
+## Error handling
+
+- Do not throw strings or other literals.
+- Use `try`/`catch` at I/O boundaries: JSON parsing, fetch calls, localStorage access, DB/storage access, and third-party APIs.
+- In backend routes, turn invalid client payloads into clear `4xx` JSON responses.
+- In frontend services, return `null` or another existing fallback when that matches the current contract, and log with context.
+- Prefer early returns over deeply nested conditionals.
+- Preserve intentional partial-failure behavior where the app falls back to alternate endpoints or defaults.
+
+## Verification expectations
+
+- Frontend logic changes: usually run `npm run compile` and targeted Jest tests.
+- Broad frontend changes: run `npm run check`.
+- Backend-only changes: at least run `npm run server:build`.
+- Auth, conversations, realtime, or avatar changes: strongly prefer backend build plus realtime smoke test when relevant.
+- Docs-only changes: run `npm run markdownlint` if you changed substantial markdown.
+
+## Agent workflow defaults
+
+- Inspect neighboring files before editing and mirror local patterns.
+- Keep diffs focused; avoid drive-by reformatting.
+- Do not modify generated outputs unless the task is explicitly about generated artifacts.
+- Prefer root-level commands unless backend-only work clearly belongs in `server/`.
+- Default to non-destructive actions and preserve old behavior unless the task explicitly changes it.
+- Document any newly introduced workflow caveat or follow-up step.

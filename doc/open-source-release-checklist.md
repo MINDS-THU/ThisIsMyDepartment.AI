@@ -1,56 +1,52 @@
-# ThisIsMyDepartment.AI Open-Source Release Checklist
+# Open-Source Release Checklist
 
-This checklist captures the remaining work between the current overhaul state and a first public open-source release.
+Status tracking for the v1.0.0 public release.
 
-## Current validated baseline
+## Completed
 
-- frontend TypeScript compilation passes
-- backend TypeScript build passes
-- backend startup has been validated after rebuilding `better-sqlite3` for the active runtime
-- default backend health endpoint responds on `http://127.0.0.1:8787/health`
-- backend production dependency audit is clean
-- copyable runtime configuration templates exist for frontend local runtime and backend local or production deployment
-- backend-managed auth, profile persistence, activity logging, conversation storage, and integrated agent chat are all present in the main repository
-- in-world navigator, avatar summoning flow, and authoritative room-sync presence are implemented in the current app
+- [x] Frontend TypeScript compilation passes
+- [x] Backend TypeScript build passes
+- [x] Backend startup validated with `better-sqlite3` under Node 20+
+- [x] Health endpoint responds on `http://127.0.0.1:8787/health`
+- [x] Backend production dependency audit is clean
+- [x] Copyable `.env` templates for frontend and backend (local + production)
+- [x] Backend-managed auth, profiles, activity logging, conversations, and AI chat routing
+- [x] In-world navigator, avatar summoning, and authoritative room-sync presence
+- [x] Overhead name labels for all characters (players, AI characters)
+- [x] Webpack dev server proxy for `/api`, `/auth`, `/socket.io`
+- [x] README rewritten as project entry point with feature list, architecture, and quick start
+- [x] Getting-started guide with install, run, troubleshooting, and env reference
+- [x] Hosting guide with Nginx config, production env, security checklist, backups
+- [x] Auth integration guide with all four modes plus security notes
+- [x] Current status document updated
+- [x] SECURITY.md with concrete reporting contact
+- [x] CODE_OF_CONDUCT.md with concrete reporting contact
+- [x] CHANGELOG.md updated for v1.0.0
+- [x] package.json version bumped to 1.0.0, license field set to MIT
+- [x] Stale files archived (TODO.md, original_README.md, implementation-plan.md, overhaul spec)
+- [x] Split Node runtime documented in getting-started and current-status
+- [x] Socket.IO v2 status documented as known limitation
+- [x] Insecure dev handoff documented with production warning
+- [x] Realtime smoke test documented and working
 
-## Release blockers
+## Remaining before tagging v1.0.0
 
-- decide and publish the canonical repository URL and maintainer/contact information
-- confirm the production auth integration guidance against a real upstream deployment
-- resolve or explicitly document the split runtime expectations between the legacy frontend toolchain and the backend SQLite dependency
-- resolve or explicitly accept the remaining root production dependency findings in the legacy `socket.io-client` stack
-- validate and document the integrated backend realtime room server deployment path used by browser clients
+- [x] Publish the canonical repository URL and replace placeholder clone URLs in docs
+- [ ] Validate auth integration against a real upstream deployment (not just curl)
+- [x] Run `npm test` clean (spell check + lint + Jest)
+- [x] Run `npm audit` and document or resolve any high/critical findings
+  - Root: 105 remaining (all in dev dependencies — webpack-dev-server, electron, etc.)
+  - Server (production): 8 (4 low, 4 moderate — all in Socket.IO v2 stack; no critical/high)
+  - No critical or high vulnerabilities in production backend code
+- [x] Verify Electron packaging on at least one target platform (macOS arm64 verified)
+- [x] Final pass on asset cleanup (legacy demo text, pre-rename references)
 
-## Dependency and runtime follow-up
+## Future work (post-v1.0.0)
 
-- review the root production audit findings affecting `socket.io-client`, `engine.io-client`, `socket.io-parser`, `ws`, and `parseuri`
-- upgrade client and server together and validate protocol compatibility before changing the Socket.IO major version
-- either keep the current split-runtime story clearly documented or deliberately converge the frontend and backend on a cleaner shared Node baseline
-- document when `npm --prefix server rebuild better-sqlite3` is required after switching runtimes in local development or CI
-
-## Documentation follow-up
-
-- replace placeholder clone/publish instructions with the final public repository URL
-- publish a real security reporting channel in [SECURITY.md](SECURITY.md)
-- keep [.env.example](.env.example), [server/.env.local.example](server/.env.local.example), and [server/.env.production.example](server/.env.production.example) aligned with the real runtime surface as configuration evolves
-- keep institution-specific login adapters outside the public repository and document only the normalized backend handoff contract
-
-## Product and packaging follow-up
-
-- finish the remaining historical cleanup in assets, demo text, and archived reference material that still reflects pre-release naming
-- verify Electron packaging metadata, icons, and app naming on each target platform you plan to support
-- decide whether the Electron shell is part of the first public release or deferred behind the browser-hosted deployment path
-
-## Security and hosting follow-up
-
-- set production cookie settings and TLS proxy expectations explicitly for the published deployment guide
-- document minimum secret management expectations for auth handoff and LLM provider keys
-- verify reverse-proxy header trust boundaries in a real deployment
-- confirm `postMessage` origin allowlists for embedded login flows
-- validate OpenRouter and OpenAI deployment guidance under the same release process used for auth and realtime checks
-
-## Nice-to-have before first tag
-
-- add a top-level release architecture diagram
-- add an end-to-end smoke test script for bootstrap, profile update, and agent chat
-- add a compatibility note describing which parts of the original Gather-derived stack are still intentionally retained
+- [ ] Upgrade Socket.IO to v4 (coordinated client + server change)
+- [ ] Converge frontend and backend on a single Node runtime
+- [ ] Add LLM provider support for Azure, Ollama, and other providers
+- [ ] Add end-to-end smoke test for bootstrap, profile, and agent chat
+- [ ] Add architecture diagram to README
+- [ ] Add health monitoring/metrics endpoint beyond `/health`
+- [ ] Evaluate horizontal scaling options (replace SQLite with PostgreSQL)
