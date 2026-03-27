@@ -3,7 +3,14 @@ import { appendMockActivity } from "../storage/memory/activityStore";
 import { getSessionIdFromRequest } from "../auth/session";
 import { parseJsonBody } from "../http/body";
 import { sendJson } from "../http/response";
-import { getSessionContext, updateAvatarProfileForUser, updateCharacterSystemPromptForUser, updatePreferencesForUser } from "../storage/memory/bootstrapStore";
+import {
+    getSessionContext,
+    updateAiHostingProfileForUser,
+    updateAvatarProfileForUser,
+    updateCharacterSystemPromptForUser,
+    updatePreferencesForUser,
+    updatePublicPersonaForUser
+} from "../storage/memory/bootstrapStore";
 
 export const handleGetCurrentUserRoute = (request: IncomingMessage, response: ServerResponse): void => {
     const sessionContext = getSessionContext(getSessionIdFromRequest(request));
@@ -29,16 +36,28 @@ export const handleUpdateProfileRoute = async (request: IncomingMessage, respons
         const payload = await parseJsonBody<{
             avatar?: { spriteIndex?: number };
             characterSystemPrompt?: string;
+            publicPersona?: { additionalDescription?: string };
+            aiHosting?: {
+                enabled?: boolean;
+                coreIdentity?: string;
+                speakingStyle?: string;
+                interactionGoals?: string;
+                relationshipGuidance?: string;
+                boundaries?: string;
+                additionalInstructions?: string;
+            };
             preferences?: Record<string, unknown>;
         }>(request);
         const spriteIndex = payload.avatar?.spriteIndex;
         const hasAvatarUpdate = payload.avatar != null;
         const hasCharacterPromptUpdate = typeof payload.characterSystemPrompt === "string";
+        const hasPublicPersonaUpdate = payload.publicPersona != null && typeof payload.publicPersona === "object" && !Array.isArray(payload.publicPersona);
+        const hasAiHostingUpdate = payload.aiHosting != null && typeof payload.aiHosting === "object" && !Array.isArray(payload.aiHosting);
         const hasPreferencesUpdate = payload.preferences != null && typeof payload.preferences === "object" && !Array.isArray(payload.preferences);
 
-        if (!hasAvatarUpdate && !hasCharacterPromptUpdate && !hasPreferencesUpdate) {
+        if (!hasAvatarUpdate && !hasCharacterPromptUpdate && !hasPublicPersonaUpdate && !hasAiHostingUpdate && !hasPreferencesUpdate) {
             sendJson(request, response, 400, {
-                error: "Profile update requires avatar, characterSystemPrompt, and/or preferences"
+                error: "Profile update requires avatar, characterSystemPrompt, publicPersona, aiHosting, and/or preferences"
             });
             return;
         }
@@ -75,6 +94,34 @@ export const handleUpdateProfileRoute = async (request: IncomingMessage, respons
                 payload: {
                     promptLength: (payload.characterSystemPrompt ?? "").trim().length,
                     hasPrompt: (payload.characterSystemPrompt ?? "").trim().length > 0
+                }
+            });
+        }
+
+        if (hasPublicPersonaUpdate) {
+            profile = updatePublicPersonaForUser(sessionContext.user.userId, payload.publicPersona ?? {});
+            appendMockActivity({
+                userId: sessionContext.user.userId,
+                sessionId: sessionContext.session.sessionId,
+                type: "character_prompt_updated",
+                actorId: sessionContext.user.userId,
+                payload: {
+                    updatedSection: "publicPersona",
+                    hasAdditionalDescription: Boolean(payload.publicPersona?.additionalDescription?.trim())
+                }
+            });
+        }
+
+        if (hasAiHostingUpdate) {
+            profile = updateAiHostingProfileForUser(sessionContext.user.userId, payload.aiHosting ?? {});
+            appendMockActivity({
+                userId: sessionContext.user.userId,
+                sessionId: sessionContext.session.sessionId,
+                type: "character_prompt_updated",
+                actorId: sessionContext.user.userId,
+                payload: {
+                    updatedSection: "aiHosting",
+                    hasPrompt: Boolean(profile.characterSystemPrompt?.trim())
                 }
             });
         }

@@ -1,4 +1,9 @@
-import type { CurrentUser, CurrentUserProfile } from "../types/currentUser";
+import type {
+    CurrentUser,
+    CurrentUserAiHostingProfile,
+    CurrentUserProfile,
+    CurrentUserPublicPersona
+} from "../types/currentUser";
 import { getBackendEndpointCandidates } from "../runtimeConfig";
 
 interface ProfileResponse {
@@ -49,6 +54,18 @@ export const saveAvatarProfile = async (spriteIndex: number): Promise<ProfileRes
 export const saveCharacterSystemPrompt = async (characterSystemPrompt: string): Promise<ProfileResponse | null> => {
     return saveProfileUpdate({
         characterSystemPrompt
+    });
+};
+
+export const savePublicPersonaProfile = async (publicPersona: CurrentUserPublicPersona): Promise<ProfileResponse | null> => {
+    return saveProfileUpdate({
+        publicPersona
+    });
+};
+
+export const saveAiHostingProfile = async (aiHosting: CurrentUserAiHostingProfile): Promise<ProfileResponse | null> => {
+    return saveProfileUpdate({
+        aiHosting
     });
 };
 

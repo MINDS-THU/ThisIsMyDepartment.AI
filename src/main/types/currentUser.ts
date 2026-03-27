@@ -1,9 +1,25 @@
+export interface CurrentUserPublicPersona {
+    additionalDescription?: string;
+}
+
+export interface CurrentUserAiHostingProfile {
+    enabled?: boolean;
+    coreIdentity?: string;
+    speakingStyle?: string;
+    interactionGoals?: string;
+    relationshipGuidance?: string;
+    boundaries?: string;
+    additionalInstructions?: string;
+}
+
 export interface CurrentUserProfile {
     avatar?: {
         spriteIndex: number;
         updatedAt: string;
     };
     characterSystemPrompt?: string;
+    publicPersona?: CurrentUserPublicPersona;
+    aiHosting?: CurrentUserAiHostingProfile;
     preferences: Record<string, unknown>;
     updatedAt: string;
 }

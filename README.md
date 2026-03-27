@@ -1,19 +1,33 @@
 # ThisIsMyDepartment.AI
 
-A self-hostable virtual department environment with identity-aware avatars, shared spaces, real-time multiplayer, and AI-controlled characters.
+A self-hostable virtual department environment with identity-aware avatars, shared spaces, real-time multiplayer, and role-based AI characters.
 
-Built for teams, labs, schools, and organizations that want a Gather-style virtual campus they fully own and control.
+Built for teams, labs, schools, and organizations that want a Gather-style virtual campus they fully own and turn into something useful: a help desk, teaching space, onboarding environment, project room, or public demo venue.
 
 > **Quick start:** [doc/getting-started.md](doc/getting-started.md)
 
 ![ThisIsMyDepartment.AI demo](resource/ShundeBuilding_demo_v2.png)
+
+## What It Is Good For
+
+This project is most useful when AI characters are attached to a place or a role rather than treated as generic chatbots.
+
+Strong fits:
+
+* **Department concierge** -- guide visitors, answer common questions, and route people to the right room or person
+* **Course office hours** -- let students walk up to a teaching assistant or course guide in context
+* **Lab onboarding** -- place safety, equipment, and process guidance directly inside the virtual environment
+* **Project rooms** -- combine shared presence, chat, dashboards, and a persistent project assistant in one space
+* **Open house or exhibition demos** -- give each room or booth an AI host that explains what is there and what to do next
+
+The app can also spawn an offline user's configured AI stand-in, but that is best treated as an optional async handoff feature, not the main product story.
 
 ## Features
 
 * **Virtual 2D world** -- pixel-art campus environment where users move, meet, and interact in real time
 * **Identity and authentication** -- pluggable auth via shared-secret POST, JWT, reverse-proxy headers, or iframe/popup postMessage bridge; includes a built-in fallback login page for development
 * **Persistent profiles** -- avatar appearance, display names, and user preferences stored server-side in SQLite
-* **AI characters** -- LLM-powered NPCs that roam the world, respond to conversations, and can represent absent team members; supports OpenAI, OpenRouter, and a mock provider for offline development
+* **Role-based AI characters** -- LLM-powered NPCs that roam the world, respond to conversations, and can represent rooms, services, courses, or absent teammates; supports OpenAI, OpenRouter, and a mock provider for offline development
 * **Real-time multiplayer** -- integrated Socket.IO room server for avatar movement, chat, and presence sync
 * **Activity logging** -- server-side logging of chat messages, room joins, avatar changes, and iframe usage
 * **Conversation storage** -- persistent player-to-player and player-to-AI chat history
@@ -21,6 +35,18 @@ Built for teams, labs, schools, and organizations that want a Gather-style virtu
 * **Voice and video** -- Jitsi integration for proximity-based audio/video chat and screensharing (requires a Jitsi Meet server)
 * **Electron support** -- can be packaged as a desktop app via Electron Forge
 * **Self-hostable** -- MIT-licensed, no external service dependencies beyond an optional LLM provider
+
+## Demo In 5 Minutes
+
+If you want to show why this project matters, demo it in this order:
+
+1. **Enter a persistent shared space** -- show that this is not just a chat app; users occupy rooms and move through a virtual environment.
+2. **Talk to a room-specific AI character** -- use a course guide, lab helper, or concierge instead of a generic personal clone.
+3. **Open an embedded tool or presentation** -- connect the character to a dashboard, slide deck, or form inside the same environment.
+4. **Move to a second room with a different role** -- show that the environment supports multiple specialized agents, not one monolithic assistant.
+5. **Show the offline stand-in feature last** -- position it as a convenience for async coverage or handoff when a person is away.
+
+This ordering makes the value proposition legible: space + roles + persistent context first, personal stand-ins second.
 
 ## Architecture Overview
 
@@ -68,6 +94,8 @@ For detailed setup including Node version management, environment configuration,
 | [doc/auth-integration.md](doc/auth-integration.md) | Connecting an upstream SSO or login system |
 | [doc/hosting.md](doc/hosting.md) | Production deployment with Nginx, reverse proxy, and TLS |
 | [doc/current-status.md](doc/current-status.md) | What is implemented, what is incomplete, known constraints |
+| [doc/product-roadmap.md](doc/product-roadmap.md) | Suggested 6-week roadmap to make the project more useful and easier to demo |
+| [doc/feature-spec.md](doc/feature-spec.md) | Product and engineering spec for role-based AI spaces, demos, and grounded assistants |
 | [doc/lighting.md](doc/lighting.md) | Tiled map editor lighting layer setup |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [SECURITY.md](SECURITY.md) | Security policy and vulnerability reporting |
@@ -80,25 +108,32 @@ Configuration templates:
 
 ## AI Characters
 
+There are two distinct AI character modes in this project:
+
+1. **Environment avatars** -- deployment-owned characters such as course teachers, room guides, concierges, or project assistants.
+2. **Offline user stand-ins** -- a user's own configured character persona, used when that user is offline and someone summons their stand-in.
+
+For most deployments, environment avatars should be the primary experience because they are easier to trust, easier to scope, and easier to demo.
+
 AI-controlled characters are defined as `*.agent.ts` files under `src/main/agents/`. Each file exports a definition with a display name, sprite, position, walk area, and system prompt.
 
-Example (`src/main/agents/chuanhao.agent.ts`):
+Example (`src/main/agents/or-teacher.agent.ts`):
 
 ```ts
 import type { LLMAgentDefinition } from "./AgentDefinition";
 
-const chuanhaoAgent: LLMAgentDefinition = {
-    id: "ChuanhaoBot",
-    agentId: "chuanhao-bot",
+const orTeacherAgent: LLMAgentDefinition = {
+    id: "ORTeacherBot",
+    agentId: "or-teacher-bot",
     displayName: "Demo Teacher",
     spriteIndex: 4,
     position: { x: 400, y: 200 },
     caption: "Press E to chat",
-    systemPrompt: "You are DemoBot, a cheerful virtual guide.",
+    systemPrompt: "You are a virtual teaching assistant. Be helpful and patient.",
     walkArea: { x: 400, y: 200, width: 100, height: 100 }
 };
 
-export default chuanhaoAgent;
+export default orTeacherAgent;
 ```
 
 Chat is routed through the backend. Provider credentials stay server-side. Configure the LLM provider with environment variables:
@@ -111,6 +146,8 @@ Chat is routed through the backend. Provider credentials stay server-side. Confi
 | `OPENROUTER_MODEL` / `OPENAI_MODEL` | Model override (defaults to `gpt-4.1-mini`) |
 
 When neither API key is configured, the backend falls back to mock mode.
+
+For a stronger deployment, avoid generic prompts and instead create characters that represent a room, a workflow, or an institutional role with bounded responsibilities.
 
 ## Modifying the Scene
 
@@ -157,7 +194,8 @@ Contributions are welcome. Please open an issue before submitting large changes.
 
 These areas are still in progress:
 
-* open-source release cleanup and final branding polish
+* role-based agents are more compelling than offline stand-ins, but the default seeded demos do not yet fully reflect that
+* agent replies are currently prompt-and-history driven; they do not yet have first-class document grounding, room knowledge packs, or tool execution
 * broader provider support beyond the current mock and OpenAI paths
 * deeper modernization of the legacy frontend and Socket.IO stack
 * final public repository metadata, maintainer details, and release packaging polish

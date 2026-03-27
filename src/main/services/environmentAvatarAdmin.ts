@@ -155,3 +155,29 @@ export const createEditableEnvironmentAvatar = async (
 
     return null;
 };
+
+export const deleteEditableEnvironmentAvatar = async (agentId: string): Promise<boolean> => {
+    const candidates = getEnvironmentAvatarAdminCandidates();
+
+    for (const endpoint of candidates) {
+        try {
+            const response = await fetchWithTimeout(`${endpoint}/${encodeURIComponent(agentId)}`, {
+                method: "DELETE",
+                credentials: "include",
+                headers: {
+                    "Accept": "application/json"
+                }
+            });
+
+            if (!response.ok) {
+                continue;
+            }
+
+            return true;
+        } catch (error) {
+            console.warn(`Environment avatar delete failed for ${endpoint}`, error);
+        }
+    }
+
+    return false;
+};

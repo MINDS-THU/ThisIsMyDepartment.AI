@@ -182,7 +182,13 @@ export class GameScene extends Scene<ThisIsMyDepartmentApp> {
 
     private spawnConfiguredAgents(): void {
         const definitions = this.game.getAgentDefinitions();
+        const existingAgentIds = new Set(
+            this.rootNode.getDescendantsByType<LLMAgentNode>(LLMAgentNode).map(node => node.getAgentId())
+        );
         definitions.filter(definition => definition.spawnByDefault !== false).forEach(definition => {
+            if (existingAgentIds.has(definition.agentId)) {
+                return;
+            }
             const agent = new LLMAgentNode({
                 id: definition.id,
                 agentId: definition.agentId,

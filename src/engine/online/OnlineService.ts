@@ -152,6 +152,9 @@ export class OnlineService {
     /** Emits when a built-in environment avatar definition is updated by an admin. */
     public onEnvironmentAvatarUpsert = new Signal<EnvironmentAvatarUpsertEvent>();
 
+    /** Emits when a built-in environment avatar is deleted by an admin. */
+    public onEnvironmentAvatarDelete = new Signal<{ agentId: string }>();
+
     /** The socket.io client that handles all the updates. */
     private socket: SocketIOClient.Socket;
 
@@ -246,6 +249,13 @@ export class OnlineService {
                 return;
             }
             this.onEnvironmentAvatarUpsert.emit(val);
+        });
+
+        this.socket.on("environmentAvatarDelete", (val: { agentId: string }) => {
+            if (!val || typeof val !== "object" || typeof val.agentId !== "string") {
+                return;
+            }
+            this.onEnvironmentAvatarDelete.emit(val);
         });
 
         // Listen on gameState changes. Those events are typically fired on gameStart, if the host starts a game or

@@ -563,10 +563,17 @@ export const getProfileRecord = (userId: string): UserProfile | undefined => {
         return undefined;
     }
 
+    const promptOverrides = parseJsonObject<{
+        publicPersona?: UserProfile["publicPersona"];
+        aiHosting?: UserProfile["aiHosting"];
+    }>(row.promptOverridesJson, {});
+
     return {
         userId: row.userId,
         avatar: parseJsonObject<UserProfile["avatar"] | undefined>(row.avatarJson, undefined),
         characterSystemPrompt: row.characterSystemPrompt ?? undefined,
+        publicPersona: promptOverrides.publicPersona ? { ...promptOverrides.publicPersona } : undefined,
+        aiHosting: promptOverrides.aiHosting ? { ...promptOverrides.aiHosting } : undefined,
         preferences: parseJsonObject<Record<string, unknown>>(row.preferencesJson, {}),
         updatedAt: row.updatedAt
     };
@@ -578,13 +585,18 @@ export const setProfileRecord = (profile: UserProfile): UserProfile => {
         avatarJson: profile.avatar ? serialize(profile.avatar) : null,
         characterSystemPrompt: profile.characterSystemPrompt ?? null,
         preferencesJson: serialize(profile.preferences),
-        promptOverridesJson: serialize({}),
+        promptOverridesJson: serialize({
+            publicPersona: profile.publicPersona ?? {},
+            aiHosting: profile.aiHosting ?? {}
+        }),
         updatedAt: profile.updatedAt
     });
     return {
         ...profile,
         avatar: profile.avatar ? { ...profile.avatar } : undefined,
         characterSystemPrompt: profile.characterSystemPrompt,
+        publicPersona: profile.publicPersona ? { ...profile.publicPersona } : undefined,
+        aiHosting: profile.aiHosting ? { ...profile.aiHosting } : undefined,
         preferences: { ...profile.preferences }
     };
 };
@@ -627,6 +639,10 @@ export const setCharacterRecord = (character: AgentDefinition): AgentDefinition 
         updatedAt: stored.updatedAt ?? new Date().toISOString()
     });
     return cloneAgentDefinition(stored);
+};
+
+export const deleteCharacterRecord = (agentId: string): void => {
+    database.prepare(`DELETE FROM characters WHERE agent_id = ?`).run(agentId);
 };
 
 export const getSessionRecord = (sessionId: string): AppSession | undefined => {

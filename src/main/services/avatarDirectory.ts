@@ -12,6 +12,7 @@ export interface AvatarDirectoryUserSummary {
         updatedAt: string;
     };
     hasCharacterSystemPrompt: boolean;
+    aiHostingEnabled: boolean;
     updatedAt?: string;
 }
 

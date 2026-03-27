@@ -44,9 +44,9 @@ import { logActivity } from "./services/activity";
 import { configureBackendLLMBridge } from "./services/backendLLMBridge";
 import { loadBootstrapState } from "./services/bootstrap";
 import { appendConversationMessage, fetchConversation } from "./services/conversations";
-import { saveAvatarProfile, saveCharacterSystemPrompt, saveProfilePreferences } from "./services/profile";
+import { saveAiHostingProfile, saveAvatarProfile, saveProfilePreferences, savePublicPersonaProfile } from "./services/profile";
 import { shouldEnableJitsi } from "./runtimeConfig";
-import { createEditableEnvironmentAvatar, EditableEnvironmentAvatar, fetchEditableEnvironmentAvatars, saveEditableEnvironmentAvatar } from "./services/environmentAvatarAdmin";
+import { createEditableEnvironmentAvatar, deleteEditableEnvironmentAvatar, EditableEnvironmentAvatar, fetchEditableEnvironmentAvatars, saveEditableEnvironmentAvatar } from "./services/environmentAvatarAdmin";
 import { ConversationEntry, ConversationWindow, ConversationWindowDisplayOptions } from "./ui/ConversationWindow";
 import { CharacterStatusOverlay } from "./ui/CharacterStatusOverlay";
 import { PresentationSessionOverlay } from "./ui/PresentationSessionOverlay";
@@ -57,7 +57,7 @@ import { TiledTextNode } from "./nodes/TiledTextNode";
 import { LoadingScene } from "./scenes/LoadingScene";
 import type { LLMAgentDefinition } from "./agents/AgentDefinition";
 import type { ActivityLogType } from "./services/activity";
-import type { BootstrapState, CurrentUser, CurrentUserProfile } from "./types/currentUser";
+import type { BootstrapState, CurrentUser, CurrentUserAiHostingProfile, CurrentUserProfile } from "./types/currentUser";
 import type { DirectMessageEvent, EnvironmentAvatarUpsertEvent, PlayerConversationEvent, RoomInfoEvent } from "../engine/online/OnlineService";
 import { AppLanguage, applyLanguageToDocument, DEFAULT_LANGUAGE, getLanguagePreference, normalizeLanguage, storeLanguagePreference, translate } from "./i18n";
 import { MediaType } from "../typings/Jitsi/service/RTC/MediaType";
@@ -212,6 +212,7 @@ export class ThisIsMyDepartmentApp extends Game {
     private avatarDirectoryRefreshForcePending = false;
     private environmentAvatarPlacementSession: EnvironmentAvatarPlacementSession | null = null;
     private readonly environmentAvatarUpdatedAt = new Map<string, string>();
+    private readonly despawningEnvironmentAvatarIds = new Set<string>();
     private readonly llmService = LLMAgentService.instance;
     private activeLLMConversation: { agent: LLMAgentNode; playerId: string; pending: boolean } | null = null;
     private activePlayerConversation: { partnerId: string; partnerName: string } | null = null;
@@ -279,6 +280,10 @@ export class ThisIsMyDepartmentApp extends Game {
         });
         this.onlineService.onEnvironmentAvatarUpsert.connect(event => {
             this.handleEnvironmentAvatarUpsert(event);
+        });
+        this.onlineService.onEnvironmentAvatarDelete.connect(event => {
+            this.removeEnvironmentAvatarDefinition(event.agentId);
+            this.removeEnvironmentAvatarFromScene(event.agentId);
         });
     }
     private _onlineService!: OnlineService;
@@ -378,7 +383,8 @@ export class ThisIsMyDepartmentApp extends Game {
             systemPrompt: agent.defaultSystemPrompt,
             provider: agent.provider,
             model: agent.model,
-            walkArea: agent.walkArea
+            walkArea: agent.walkArea,
+            spawnByDefault: agent.spawnByDefault
         }));
     }
 
@@ -553,9 +559,11 @@ export class ThisIsMyDepartmentApp extends Game {
 
         this.settingsOverlay.open({
             initialTab,
+            currentUser: this.currentUser ?? undefined,
             initialLanguage: this.currentLanguage,
             initialSpriteIndex: this.currentUserProfile?.avatar?.spriteIndex ?? this.initialPlayerSprite,
-            initialPrompt: this.currentUserProfile?.characterSystemPrompt ?? "",
+            initialPublicPersona: this.currentUserProfile?.publicPersona,
+            initialAiHosting: this.currentUserProfile?.aiHosting,
             initialAudioEnabled: this.isLocalAudioEnabled(),
             initialVideoEnabled: this.isLocalVideoEnabled(),
             canManageEnvironmentAvatars: this.isCurrentUserAdmin(),
@@ -570,8 +578,11 @@ export class ThisIsMyDepartmentApp extends Game {
             onAvatarSave: async (spriteIndex: number) => {
                 await this.saveAvatarSelection(spriteIndex);
             },
-            onPromptSave: async (prompt: string) => {
-                await this.saveOwnCharacterSystemPrompt(prompt);
+            onPublicPersonaSave: async publicPersona => {
+                await this.saveOwnPublicPersona(publicPersona.additionalDescription ?? "");
+            },
+            onAiHostingSave: async aiHosting => {
+                await this.saveOwnAiHostingProfile(aiHosting);
             },
             onLanguageSave: async (language: AppLanguage) => {
                 await this.saveLanguagePreference(language);
@@ -584,6 +595,9 @@ export class ThisIsMyDepartmentApp extends Game {
             },
             onEnvironmentAvatarSave: async avatar => {
                 return this.saveEnvironmentAvatarConfiguration(avatar);
+            },
+            onEnvironmentAvatarDelete: async agentId => {
+                return this.deleteEnvironmentAvatarConfiguration(agentId);
             },
             onEnvironmentAvatarPlacementStart: async (avatar, mode) => {
                 return this.beginEnvironmentAvatarPlacement(avatar, mode);
@@ -689,13 +703,32 @@ export class ThisIsMyDepartmentApp extends Game {
         this.showNotification(this.t("profile.avatarSaved"));
     }
 
-    private async saveOwnCharacterSystemPrompt(prompt: string): Promise<void> {
-        const result = await saveCharacterSystemPrompt(prompt);
+    private async saveOwnPublicPersona(additionalDescription: string): Promise<void> {
+        const result = await savePublicPersonaProfile({
+            additionalDescription
+        });
         if (!result) {
-            throw new Error("Character prompt update failed.");
+            throw new Error("Character profile update failed.");
         }
         this.setCurrentUserProfile(result.profile);
-        this.showNotification(prompt.trim().length > 0 ? this.t("profile.promptSaved") : this.t("profile.promptCleared"));
+        this.showNotification(this.t("profile.publicPersonaSaved"));
+    }
+
+    private async saveOwnAiHostingProfile(aiHosting: CurrentUserAiHostingProfile): Promise<void> {
+        const result = await saveAiHostingProfile(aiHosting);
+        if (!result) {
+            throw new Error("AI hosting profile update failed.");
+        }
+        this.setCurrentUserProfile(result.profile);
+        const hasConfiguredFields = [
+            aiHosting.coreIdentity,
+            aiHosting.speakingStyle,
+            aiHosting.interactionGoals,
+            aiHosting.relationshipGuidance,
+            aiHosting.boundaries,
+            aiHosting.additionalInstructions
+        ].some(value => (value ?? "").trim().length > 0);
+        this.showNotification(hasConfiguredFields ? this.t("profile.aiHostingSaved") : this.t("profile.aiHostingCleared"));
     }
 
     private async saveLanguagePreference(language: AppLanguage): Promise<void> {
@@ -771,6 +804,16 @@ export class ThisIsMyDepartmentApp extends Game {
         this.refreshEnvironmentAvatarInScene(savedAvatar);
         this.showNotification(`${savedAvatar.displayName} updated.`);
         return savedAvatar;
+    }
+
+    private async deleteEnvironmentAvatarConfiguration(agentId: string): Promise<void> {
+        const deleted = await deleteEditableEnvironmentAvatar(agentId);
+        if (!deleted) {
+            throw new Error("Environment avatar deletion failed.");
+        }
+
+        this.removeEnvironmentAvatarDefinition(agentId);
+        this.removeEnvironmentAvatarFromScene(agentId);
     }
 
     private async beginEnvironmentAvatarPlacement(
@@ -967,6 +1010,31 @@ export class ThisIsMyDepartmentApp extends Game {
         this.agentDefinitions.push(nextDefinition);
     }
 
+    private removeEnvironmentAvatarDefinition(agentId: string): void {
+        this.environmentAvatarUpdatedAt.delete(agentId);
+        const definitionIndex = this.agentDefinitions.findIndex(definition => definition.agentId === agentId);
+        if (definitionIndex >= 0) {
+            this.agentDefinitions.splice(definitionIndex, 1);
+        }
+    }
+
+    private removeEnvironmentAvatarFromScene(agentId: string): void {
+        if (!this.isInGameScene()) {
+            return;
+        }
+
+        const sceneRoot = this.getGameScene().rootNode;
+        const existingNode = sceneRoot.getDescendantsByType<LLMAgentNode>(LLMAgentNode)
+            .find(node => node.getAgentId() === agentId);
+
+        if (existingNode) {
+            if (this.activeLLMConversation?.agent === existingNode) {
+                this.closeLLMConversation(existingNode);
+            }
+            this.animateEnvironmentAvatarDespawn(existingNode);
+        }
+    }
+
     private handleEnvironmentAvatarUpsert(avatar: EnvironmentAvatarUpsertEvent): void {
         if (!avatar.agentId || avatar.ownerUserId) {
             return;
@@ -1001,11 +1069,16 @@ export class ThisIsMyDepartmentApp extends Game {
             return;
         }
 
+        if (this.despawningEnvironmentAvatarIds.has(avatar.agentId)) {
+            return;
+        }
+
         const sceneRoot = this.getGameScene().rootNode;
         const existingNode = sceneRoot.getDescendantsByType<LLMAgentNode>(LLMAgentNode)
             .find(node => node.getAgentId() === avatar.agentId);
 
         const spawnReplacement = () => {
+            this.despawningEnvironmentAvatarIds.delete(avatar.agentId);
             if (avatar.spawnByDefault === false) {
                 return;
             }
@@ -1019,6 +1092,7 @@ export class ThisIsMyDepartmentApp extends Game {
             if (this.activeLLMConversation?.agent === existingNode) {
                 this.closeLLMConversation(existingNode);
             }
+            this.despawningEnvironmentAvatarIds.add(avatar.agentId);
             this.animateEnvironmentAvatarDespawn(existingNode, spawnReplacement);
             return;
         }
@@ -1164,6 +1238,8 @@ export class ThisIsMyDepartmentApp extends Game {
         return {
             ...profile,
             avatar: profile.avatar ? { ...profile.avatar } : undefined,
+            publicPersona: profile.publicPersona ? { ...profile.publicPersona } : undefined,
+            aiHosting: profile.aiHosting ? { ...profile.aiHosting } : undefined,
             preferences: { ...profile.preferences }
         };
     }
@@ -2911,6 +2987,8 @@ export class ThisIsMyDepartmentApp extends Game {
                         : undefined,
                 statusLabel: user.isOnline
                     ? undefined
+                    : user.aiHostingEnabled === false
+                        ? this.t("navigator.avatars.statusHostingDisabled")
                     : user.hasCharacterSystemPrompt
                         ? this.t("navigator.avatars.statusPromptConfigured")
                         : undefined
@@ -3046,6 +3124,11 @@ export class ThisIsMyDepartmentApp extends Game {
             return;
         }
 
+        if (targetUser?.aiHostingEnabled === false) {
+            this.showNotification(this.t("navigator.avatars.spawnDisabled", { name: targetUser.displayName }));
+            return;
+        }
+
         this.avatarDirectoryBusyUserId = trimmedUserId;
         this.refreshSceneNavigatorOverlay();
 
@@ -3116,7 +3199,8 @@ export class ThisIsMyDepartmentApp extends Game {
             const shouldRecreate = forceRecreate
                 || !existingNode
                 || existingNode.getAgentId() !== presence.agentId
-                || existingNode.getDisplayName() !== presence.displayName;
+                || existingNode.getDisplayName() !== presence.displayName
+                || existingNode.getSpriteIndex() !== presence.spriteIndex;
 
             let node = existingNode;
             if (shouldRecreate) {

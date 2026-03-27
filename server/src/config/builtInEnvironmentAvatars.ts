@@ -10,7 +10,7 @@ const buildTeacherSystemPrompt = (displayName: string, specialization: string): 
 
 const builtInEnvironmentAvatarTemplates: BuiltInEnvironmentAvatarDefinition[] = [
     {
-        agentId: "chuanhao-bot",
+        agentId: "or-teacher-bot",
         displayName: "运筹学课程老师",
         spriteIndex: 4,
         position: { x: 548.67, y: 1085.67 },
@@ -22,7 +22,7 @@ const builtInEnvironmentAvatarTemplates: BuiltInEnvironmentAvatarDefinition[] = 
         spawnByDefault: true
     },
     {
-        agentId: "chenwang-bot",
+        agentId: "ie-teacher-bot",
         displayName: "工业工程实践课程老师",
         spriteIndex: 3,
         position: { x: 129.67, y: 1092.67 },

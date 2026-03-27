@@ -172,6 +172,17 @@ export const broadcastEnvironmentAvatarUpsert = (avatar: AgentDefinition): void 
     });
 };
 
+export const broadcastEnvironmentAvatarDelete = (agentId: string): void => {
+    if (!activeIo) {
+        return;
+    }
+
+    rooms.forEach(room => {
+        activeIo!.to(room.roomId).emit("environmentAvatarDelete", { agentId });
+        activeIo!.to(room.roomId).emit("roomInfo", buildRoomInfoPayload(room));
+    });
+};
+
 const resolveRoomId = (socket: SocketLike): string => {
     const roomId = socket.handshake?.query?.room;
     if (typeof roomId === "string" && roomId.trim().length > 0) {

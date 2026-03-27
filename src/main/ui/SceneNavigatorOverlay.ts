@@ -41,6 +41,7 @@ export class SceneNavigatorOverlay {
         if (!this.root) {
             this.root = document.createElement("div");
             this.root.className = "timd-scene-navigator";
+            this.root.style.setProperty("--timd-panel-width", "min(312px, calc(100vw - 32px))");
             document.body.appendChild(this.root);
         }
         this.root.hidden = false;
@@ -111,8 +112,8 @@ export class SceneNavigatorOverlay {
 
         const collapseButton = document.createElement("button");
         collapseButton.type = "button";
-        collapseButton.className = "timd-sidebar-toggle timd-sidebar-toggle--navigator";
-        collapseButton.textContent = this.collapsed ? "›" : "‹";
+        collapseButton.className = "timd-sidebar-rail timd-sidebar-rail--navigator";
+        collapseButton.textContent = this.collapsed ? "»" : "«";
         collapseButton.title = this.collapsed ? "Expand navigator panel" : "Collapse navigator panel";
         collapseButton.setAttribute("aria-label", collapseButton.title);
         collapseButton.onclick = () => {
@@ -205,7 +206,7 @@ export class SceneNavigatorOverlay {
                     previousGroupLabel = groupLabel;
                 }
 
-                const canSpawn = !!avatar.avatar && !avatar.isOnline;
+                const canSpawn = !!avatar.avatar && !avatar.isOnline && avatar.aiHostingEnabled !== false;
                 const spawnButtonLabel = this.busyUserId === avatar.userId
                     ? app.t("navigator.avatars.spawning")
                     : app.t("navigator.avatars.spawn");
@@ -234,11 +235,11 @@ export class SceneNavigatorOverlay {
         body.appendChild(roomsSection);
         body.appendChild(avatarsSection);
 
-        panel.appendChild(collapseButton);
         panel.appendChild(header);
         panel.appendChild(tabs);
         panel.appendChild(body);
         this.root.appendChild(panel);
+        this.root.appendChild(collapseButton);
         this.applyCollapsedState();
     }
 
