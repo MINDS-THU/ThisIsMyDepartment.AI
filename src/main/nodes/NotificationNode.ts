@@ -10,7 +10,11 @@ export class NotificationNode extends SceneNode<ThisIsMyDepartmentApp> {
     @asset("sounds/interface/back.mp3")
     private static notificationSound: Sound;
 
-    private textNode = new TextNode<ThisIsMyDepartmentApp>({ font: ThisIsMyDepartmentApp.standardFont, anchor: Direction.TOP_RIGHT });
+    private textNode = new TextNode<ThisIsMyDepartmentApp>({
+        font: ThisIsMyDepartmentApp.standardFont,
+        anchor: Direction.TOP_RIGHT,
+        fallbackFont: "16px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif"
+    });
     private startTime?: number;
     private endTime?: number;
     private currentTime = 0;

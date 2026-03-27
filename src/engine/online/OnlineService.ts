@@ -27,7 +27,8 @@ export interface RoomInfoEvent {
         wanderArea?: { x: number; y: number; width: number; height: number };
         lastInteractionAt: string;
         expiresAt: string;
-    }>
+    }>,
+    environmentAvatars?: Array<EnvironmentAvatarUpsertEvent>
 }
 
 export interface SpawnedAvatarUpsertEvent {
@@ -75,6 +76,22 @@ export interface PlayerConversationEvent {
     toUserId: string;
     action: "open" | "close";
     timestamp: number;
+}
+
+export interface EnvironmentAvatarUpsertEvent {
+    agentId: string;
+    displayName: string;
+    spriteIndex: number;
+    position: { x: number; y: number };
+    caption?: string;
+    defaultSystemPrompt?: string;
+    provider: "mock" | "openai" | "openrouter" | "anthropic" | "ollama" | "azure-openai";
+    model: string;
+    walkArea?: { x: number; y: number; width: number; height: number };
+    characterRole?: "teacher" | "student" | "staff" | "custom";
+    ownerUserId?: string;
+    spawnByDefault?: boolean;
+    updatedAt?: string;
 }
 
 @Service
@@ -131,6 +148,9 @@ export class OnlineService {
 
     /** Emits on room info updates, including shared spawned avatar state. */
     public onRoomInfoUpdate = new Signal<RoomInfoEvent>();
+
+    /** Emits when a built-in environment avatar definition is updated by an admin. */
+    public onEnvironmentAvatarUpsert = new Signal<EnvironmentAvatarUpsertEvent>();
 
     /** The socket.io client that handles all the updates. */
     private socket: SocketIOClient.Socket;
@@ -219,6 +239,13 @@ export class OnlineService {
                 this.onOtherPlayerDisconnect.emit(val.playerLeftUserId ?? val.playerLeft!);
             }
             this.onRoomInfoUpdate.emit(val);
+        });
+
+        this.socket.on("environmentAvatarUpsert", (val: EnvironmentAvatarUpsertEvent) => {
+            if (!val || typeof val !== "object" || typeof val.agentId !== "string") {
+                return;
+            }
+            this.onEnvironmentAvatarUpsert.emit(val);
         });
 
         // Listen on gameState changes. Those events are typically fired on gameStart, if the host starts a game or

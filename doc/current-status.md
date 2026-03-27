@@ -56,6 +56,7 @@ Implemented:
 * persisted player-to-player conversation storage
 * persisted user-to-agent conversation storage
 * frontend conversation window backed by server-side conversation APIs
+* AI-authored messages are labeled in the conversation window so users can distinguish agent replies from human-authored lines
 
 ### AI characters
 
@@ -65,10 +66,12 @@ Implemented:
 * shared chat path for teacher and student AI-controlled characters
 * user-editable prompt for the user's own offline AI-controlled character
 * deployment-owned default teacher characters seeded into persistence when missing
+* AI-controlled avatars can wander with collision-aware pathfinding instead of walking directly into blocked tiles
 
 Current provider support:
 
 * mock provider
+* OpenRouter provider via `OPENROUTER_API_KEY`
 * OpenAI provider via `OPENAI_API_KEY`
 
 ### Realtime and room sync
@@ -78,7 +81,17 @@ Implemented:
 * integrated Socket.IO room server inside the backend package
 * frontend room sync using the backend as the authoritative multiplayer server
 * stable user ID handling for join, leave, reconnect, and character updates
+* summoned avatar presence is shared through the same authoritative room-sync path
 * repeatable realtime smoke test script in `scripts/realtimeSmokeTest.js`
+
+### In-world navigation and operator UX
+
+Implemented:
+
+* scene navigator overlay for room teleport shortcuts
+* avatar directory for browsing known users and summoning AI-managed avatar stand-ins when the owner is offline
+* collapsible character-status and navigator side panels to preserve viewport space on smaller screens
+* terminology cleanup in the current UI so avatar-related flows describe summoning rather than ad hoc generation
 
 ### Frontend runtime cleanup already done
 
@@ -103,17 +116,23 @@ Supported and tested shape:
 
 These are known non-final areas, not hidden surprises:
 
-* broader provider support beyond mock and OpenAI
+* broader provider support beyond mock, OpenAI, and OpenRouter
 * remaining cleanup of historical asset names, demo copy, and archived reference material
 * modernization of the legacy frontend packaging and Socket.IO dependency stack
+* alignment of the repository on a cleaner single-runtime story for the legacy frontend toolchain and the newer backend SQLite dependency
 * public release polish for docs, templates, and maintainer metadata
-* broader end-to-end testing coverage
+* broader end-to-end testing coverage and more explicit deployment validation
 
 ## Important technical constraints
 
 ### Node version
 
-The legacy frontend toolchain is still pinned to Node `16.20.2`.
+The repository currently has split runtime expectations:
+
+* the root frontend toolchain still carries a Node `16.20.2` Volta pin from the legacy webpack and Electron stack
+* the backend currently depends on `better-sqlite3@12.x`, whose published engine support targets newer Node releases
+
+This does not block development, but it is an honest release-readiness issue and should be treated as remaining cleanup rather than hidden complexity.
 
 ### Frontend build behavior
 
@@ -133,11 +152,12 @@ On localhost:
 
 ## Release-readiness summary
 
-The repository is usable for development and controlled self-hosting work, but it should still be treated as a project in active cleanup rather than a fully polished public release.
+The repository is now suitable for continued development, internal pilots, and controlled self-hosting work, but it should still be treated as a project in active cleanup rather than a fully polished public release.
 
 Practical interpretation:
 
 * good enough for continued implementation and pilot deployment work
+* good enough to demonstrate the complete backend-managed identity, persistence, and integrated agent architecture
 * not yet fully documented or polished enough to call the open-source release finished
 
 ## Where to look next

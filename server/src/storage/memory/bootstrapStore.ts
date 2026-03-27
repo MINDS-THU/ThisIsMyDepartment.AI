@@ -1,4 +1,5 @@
 import type { AgentDefinition, AppSession, BootstrapResponse, ClientType, DepartmentUser, UserProfile, VerifiedIdentity } from "../../../../shared/types";
+import { buildBuiltInEnvironmentAvatarDefinitions, getBuiltInEnvironmentAvatarIds } from "../../config/builtInEnvironmentAvatars";
 import { getServerConfig } from "../../config";
 import { deleteSessionRecord, getCharacterRecord, getExternalIdentityUserId, getProfileRecord, getSessionRecord, getUserRecord, listCharacterRecords, listUserRecords, setCharacterRecord, setExternalIdentityUserId, setProfileRecord, setSessionRecord, setUserRecord } from "../stateStore";
 
@@ -56,36 +57,10 @@ function buildConfiguredDefaultAgentRoute(): Pick<AgentDefinition, "provider" | 
     };
 }
 
-const buildTeacherSystemPrompt = (displayName: string, specialization: string): string => {
-    return `You are ${displayName}, an AI department teacher avatar specializing in ${specialization}. Answer like an experienced instructor inside a university department. Be concise, helpful, and honest about uncertainty. Use the user's recent activity context when it is relevant.`;
-};
-
-const seededCharacters: AgentDefinition[] = [
-    {
-        agentId: "chuanhao-bot",
-        displayName: "运筹学课程老师",
-        spriteIndex: 4,
-        position: { x: 548.67, y: 1085.67 },
-        caption: "按E键聊天",
-        defaultSystemPrompt: buildTeacherSystemPrompt("运筹学课程老师", "operations research and analytical problem solving"),
-        ...buildConfiguredDefaultAgentRoute(),
-        walkArea: { x: 548.67, y: 1085.67, width: 50, height: 50 },
-        characterRole: "teacher",
-        spawnByDefault: true
-    },
-    {
-        agentId: "chenwang-bot",
-        displayName: "工业工程实践课程老师",
-        spriteIndex: 3,
-        position: { x: 129.67, y: 1092.67 },
-        caption: "按E键聊天",
-        defaultSystemPrompt: buildTeacherSystemPrompt("工业工程实践课程老师", "industrial engineering practice, project work, and applied methods"),
-        ...buildConfiguredDefaultAgentRoute(),
-        walkArea: { x: 129.67, y: 1092.67, width: 50, height: 50 },
-        characterRole: "teacher",
-        spawnByDefault: true
-    }
-];
+const seededCharacters = (): AgentDefinition[] => buildBuiltInEnvironmentAvatarDefinitions(buildConfiguredDefaultAgentRoute());
+const DEFAULT_ENVIRONMENT_AVATAR_DISPLAY_NAME = "New environment avatar";
+const DEFAULT_ENVIRONMENT_AVATAR_CAPTION = "Press E to chat";
+const DEFAULT_ENVIRONMENT_AVATAR_WALK_SIZE = 80;
 
 const cloneCharacterDefinition = (definition: AgentDefinition): AgentDefinition => ({
     ...definition,
@@ -93,11 +68,38 @@ const cloneCharacterDefinition = (definition: AgentDefinition): AgentDefinition 
     walkArea: definition.walkArea ? { ...definition.walkArea } : undefined
 });
 
+const buildDefaultEnvironmentAvatarPrompt = (displayName: string): string => {
+    return `You are ${displayName}, an AI department avatar inside a virtual department environment. Be concise, helpful, and honest about uncertainty. Use the user's recent activity context when it is relevant.`;
+};
+
+const buildDefaultEnvironmentAvatarWalkArea = (position: { x: number; y: number }) => ({
+    x: position.x,
+    y: position.y,
+    width: DEFAULT_ENVIRONMENT_AVATAR_WALK_SIZE,
+    height: DEFAULT_ENVIRONMENT_AVATAR_WALK_SIZE
+});
+
+const createEnvironmentAvatarAgentId = (displayName: string): string => {
+    const baseId = `env-${normalizeIdPart(displayName)}`;
+    const existingIds = new Set(listCharacterRecords().map(character => character.agentId));
+    if (!existingIds.has(baseId)) {
+        return baseId;
+    }
+
+    let suffix = 2;
+    while (existingIds.has(`${baseId}-${suffix}`)) {
+        suffix += 1;
+    }
+    return `${baseId}-${suffix}`;
+};
+
 const ensureSeededCharacters = (): AgentDefinition[] => {
+    const builtInDefinitions = seededCharacters();
+    const builtInCharacterIds = new Set(getBuiltInEnvironmentAvatarIds());
     const persistedCharacters = listCharacterRecords();
     const persistedById = new Map(persistedCharacters.map(character => [character.agentId, character]));
 
-    seededCharacters.forEach(character => {
+    builtInDefinitions.forEach(character => {
         const persistedCharacter = persistedById.get(character.agentId);
         if (!persistedCharacter) {
             setCharacterRecord({
@@ -107,9 +109,12 @@ const ensureSeededCharacters = (): AgentDefinition[] => {
             return;
         }
 
-        const shouldCanonicalizeDeploymentCharacter = !persistedCharacter.ownerUserId;
+        const legacyName = LEGACY_SEEDED_CHARACTER_NAMES[character.agentId];
+        const shouldMigrateLegacyDeploymentCharacter = !persistedCharacter.ownerUserId
+            && !!legacyName
+            && persistedCharacter.displayName === legacyName;
 
-        if (shouldCanonicalizeDeploymentCharacter) {
+        if (shouldMigrateLegacyDeploymentCharacter) {
             setCharacterRecord({
                 ...cloneCharacterDefinition(character),
                 updatedAt: persistedCharacter.updatedAt ?? now()
@@ -118,7 +123,9 @@ const ensureSeededCharacters = (): AgentDefinition[] => {
     });
 
     const characters = listCharacterRecords();
-    return (characters.length > 0 ? characters : seededCharacters).map(cloneCharacterDefinition);
+    const filteredCharacters = (characters.length > 0 ? characters : builtInDefinitions)
+        .filter(character => character.ownerUserId || builtInCharacterIds.has(character.agentId));
+    return filteredCharacters.map(cloneCharacterDefinition);
 };
 
 export const getMockBootstrapResponse = (): BootstrapResponse => ({
@@ -333,10 +340,55 @@ export const getCharacterDefinitions = (): AgentDefinition[] => ensureSeededChar
     .filter(definition => !definition.ownerUserId)
     .map(definition => cloneCharacterDefinition(definition));
 
+export const getBuiltInEnvironmentAvatarDefinitions = (): AgentDefinition[] => getCharacterDefinitions();
+
 export const getCharacterDefinitionById = (agentId: string): AgentDefinition | undefined => {
     ensureSeededCharacters();
     const record = getCharacterRecord(agentId);
     return record ? hydrateAvatarAgentDefinition(record) : undefined;
+};
+
+export const createBuiltInEnvironmentAvatarDefinition = (
+    seed: Partial<Pick<AgentDefinition, "displayName" | "spriteIndex" | "position" | "caption" | "defaultSystemPrompt" | "walkArea" | "characterRole" | "spawnByDefault">>
+): AgentDefinition => {
+    ensureSeededCharacters();
+    const displayName = seed.displayName?.trim() || DEFAULT_ENVIRONMENT_AVATAR_DISPLAY_NAME;
+    const position = seed.position ? { ...seed.position } : { x: 128, y: 1088 };
+    const walkArea = seed.walkArea
+        ? { ...seed.walkArea }
+        : buildDefaultEnvironmentAvatarWalkArea(position);
+
+    return setCharacterRecord({
+        agentId: createEnvironmentAvatarAgentId(displayName),
+        displayName,
+        spriteIndex: seed.spriteIndex ?? 0,
+        position,
+        caption: seed.caption?.trim() || DEFAULT_ENVIRONMENT_AVATAR_CAPTION,
+        defaultSystemPrompt: seed.defaultSystemPrompt?.trim() || buildDefaultEnvironmentAvatarPrompt(displayName),
+        ...buildConfiguredDefaultAgentRoute(),
+        walkArea,
+        characterRole: seed.characterRole ?? "custom",
+        ownerUserId: undefined,
+        spawnByDefault: seed.spawnByDefault ?? true,
+        updatedAt: now()
+    });
+};
+
+export const updateBuiltInEnvironmentAvatarDefinition = (character: AgentDefinition): AgentDefinition | null => {
+    if (character.ownerUserId) {
+        return null;
+    }
+
+    const existing = getCharacterRecord(character.agentId);
+    if (!existing || existing.ownerUserId) {
+        return null;
+    }
+
+    return setCharacterRecord({
+        ...cloneCharacterDefinition(character),
+        ownerUserId: undefined,
+        updatedAt: now()
+    });
 };
 
 export const updateAvatarProfileForUser = (userId: string, spriteIndex: number): UserProfile => {

@@ -1,9 +1,16 @@
 import { getStoredMediaDevicePreference } from "../constants";
 import { AppLanguage, getCodeFontStack, getUiFontStack, translate } from "../i18n";
+import { EditableEnvironmentAvatar } from "../services/environmentAvatarAdmin";
 import { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
 
-type SettingsTabId = "media" | "language" | "character" | "ai-prompt";
+type SettingsTabId = "media" | "language" | "character" | "ai-prompt" | "environment-avatars";
 type MediaDeviceKind = "audioinput" | "audiooutput" | "videoinput";
+type EnvironmentAvatarPlacementMode = "position" | "walk-area";
+
+interface EnvironmentAvatarPlacementResult {
+    position?: { x: number; y: number };
+    walkArea?: { x: number; y: number; width: number; height: number };
+}
 
 interface MediaDeviceOption {
     deviceId: string;
@@ -18,10 +25,16 @@ interface SettingsOverlayOpenArgs {
     initialPrompt: string;
     initialAudioEnabled: boolean;
     initialVideoEnabled: boolean;
+    canManageEnvironmentAvatars?: boolean;
     getMediaDevices: () => Promise<MediaDeviceOption[]>;
     onAvatarSave: (spriteIndex: number) => Promise<void>;
     onPromptSave: (prompt: string) => Promise<void>;
     onLanguageSave: (language: AppLanguage) => Promise<void>;
+    loadEnvironmentAvatars?: () => Promise<EditableEnvironmentAvatar[]>;
+    onEnvironmentAvatarCreate?: (seed?: Partial<EditableEnvironmentAvatar>) => Promise<EditableEnvironmentAvatar>;
+    onEnvironmentAvatarSave?: (avatar: EditableEnvironmentAvatar) => Promise<EditableEnvironmentAvatar>;
+    onEnvironmentAvatarPlacementStart?: (avatar: EditableEnvironmentAvatar, mode: EnvironmentAvatarPlacementMode) => Promise<EnvironmentAvatarPlacementResult | null>;
+    onEnvironmentAvatarPlacementCancel?: () => void;
     onMediaToggle: (kind: Extract<MediaDeviceKind, "audioinput" | "videoinput">, enabled: boolean) => Promise<boolean> | boolean;
     onMediaDeviceChange: (kind: MediaDeviceKind, deviceId: string) => Promise<void> | void;
 }
@@ -31,6 +44,7 @@ const OVERLAY_Z_INDEX = "10000";
 export class SettingsOverlay {
     private backdrop?: HTMLDivElement;
     private panel?: HTMLDivElement;
+    private sidebar?: HTMLDivElement;
     private content?: HTMLDivElement;
     private sidebarTitle?: HTMLDivElement;
     private sidebarSubtitle?: HTMLParagraphElement;
@@ -47,6 +61,16 @@ export class SettingsOverlay {
     private selectedSpriteIndex = 0;
     private promptValue = "";
     private busy = false;
+    private environmentAvatarLoading = false;
+    private environmentAvatarLoaded = false;
+    private environmentAvatarError: string | null = null;
+    private environmentAvatarDrafts: EditableEnvironmentAvatar[] = [];
+    private environmentAvatarStatuses = new Map<string, string>();
+    private environmentAvatarToolbarStatus: string | null = null;
+    private selectedEnvironmentAvatarId: string | null = null;
+    private environmentPlacementMode: EnvironmentAvatarPlacementMode | null = null;
+    private environmentToast?: HTMLDivElement;
+    private environmentToastTimeoutId: number | null = null;
     private avatarPreviewCanvases: HTMLCanvasElement[] = [];
     private mediaState = {
         audioEnabled: false,
@@ -56,11 +80,20 @@ export class SettingsOverlay {
     public open(args: SettingsOverlayOpenArgs): void {
         this.close();
         this.currentArgs = args;
-        this.activeTab = args.initialTab ?? "media";
+        this.activeTab = this.getAvailableTabs(args).includes(args.initialTab ?? "media") ? (args.initialTab ?? "media") : "media";
         this.language = args.initialLanguage;
         this.selectedLanguage = args.initialLanguage;
         this.selectedSpriteIndex = args.initialSpriteIndex;
         this.promptValue = args.initialPrompt;
+        this.environmentAvatarLoading = false;
+        this.environmentAvatarLoaded = false;
+        this.environmentAvatarError = null;
+        this.environmentAvatarDrafts = [];
+        this.environmentAvatarStatuses.clear();
+        this.environmentAvatarToolbarStatus = null;
+        this.selectedEnvironmentAvatarId = null;
+        this.environmentPlacementMode = null;
+        this.clearEnvironmentToast();
         this.mediaState = {
             audioEnabled: args.initialAudioEnabled,
             videoEnabled: args.initialVideoEnabled
@@ -82,9 +115,11 @@ export class SettingsOverlay {
 
         const panel = document.createElement("div");
         panel.style.width = "min(980px, calc(100vw - 32px))";
+        panel.style.height = "calc(100vh - 32px)";
         panel.style.maxHeight = "calc(100vh - 32px)";
         panel.style.display = "grid";
         panel.style.gridTemplateColumns = "220px minmax(0, 1fr)";
+        panel.style.minHeight = "0";
         panel.style.overflow = "hidden";
         panel.style.borderRadius = "22px";
         panel.style.border = "1px solid rgba(164, 190, 255, 0.26)";
@@ -94,9 +129,14 @@ export class SettingsOverlay {
         panel.style.fontFamily = getUiFontStack(this.language);
 
         const sidebar = document.createElement("div");
+        sidebar.style.minHeight = "0";
         sidebar.style.padding = "24px 18px";
         sidebar.style.background = "linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01))";
         sidebar.style.borderRight = "1px solid rgba(164, 190, 255, 0.12)";
+        sidebar.style.overflowY = "auto";
+        sidebar.style.overflowX = "hidden";
+        sidebar.style.overscrollBehavior = "contain";
+        sidebar.style.setProperty("scrollbar-gutter", "stable");
 
         const title = document.createElement("div");
         title.textContent = this.t("settings.sidebarTitle");
@@ -117,7 +157,7 @@ export class SettingsOverlay {
         tabList.style.display = "grid";
         tabList.style.gap = "10px";
 
-        (["media", "language", "character", "ai-prompt"] as SettingsTabId[]).forEach(tabId => {
+        this.getAvailableTabs(args).forEach(tabId => {
             const tabButton = document.createElement("button");
             tabButton.type = "button";
             tabButton.textContent = this.getTabLabel(tabId);
@@ -138,6 +178,9 @@ export class SettingsOverlay {
                 this.activeTab = tabId;
                 this.renderContent();
                 this.refreshTabButtonStates();
+                if (tabId === "environment-avatars") {
+                    void this.ensureEnvironmentAvatarsLoaded();
+                }
             };
             tabButton.dataset.settingsTab = tabId;
             tabList.appendChild(tabButton);
@@ -162,8 +205,21 @@ export class SettingsOverlay {
         this.closeButton = closeButton;
 
         const content = document.createElement("div");
+        content.style.minHeight = "0";
+        content.style.height = "100%";
+        content.style.maxHeight = "100%";
         content.style.padding = "28px";
-        content.style.overflow = "auto";
+        content.style.overflowY = "scroll";
+        content.style.overflowX = "hidden";
+        content.style.overscrollBehavior = "contain";
+        content.style.setProperty("-webkit-overflow-scrolling", "touch");
+        content.style.setProperty("scrollbar-gutter", "stable both-edges");
+
+        const stopWheelPropagation = (event: WheelEvent): void => {
+            event.stopPropagation();
+        };
+        sidebar.addEventListener("wheel", stopWheelPropagation, { passive: true });
+        content.addEventListener("wheel", stopWheelPropagation, { passive: true });
 
         sidebar.appendChild(title);
         sidebar.appendChild(subtitle);
@@ -182,6 +238,7 @@ export class SettingsOverlay {
 
         this.backdrop = backdrop;
         this.panel = panel;
+        this.sidebar = sidebar;
         this.content = content;
         this.detachKeydown = this.attachEscapeListener();
         this.renderContent();
@@ -189,17 +246,30 @@ export class SettingsOverlay {
     }
 
     public close(): void {
+        if (this.environmentPlacementMode) {
+            this.currentArgs?.onEnvironmentAvatarPlacementCancel?.();
+        }
         this.detachKeydown?.();
         this.detachKeydown = undefined;
         this.backdrop?.remove();
         this.backdrop = undefined;
         this.panel = undefined;
+        this.sidebar = undefined;
         this.content = undefined;
         this.mediaStatus = undefined;
         this.characterStatus = undefined;
         this.promptStatus = undefined;
         this.currentArgs = undefined;
         this.busy = false;
+        this.environmentAvatarLoading = false;
+        this.environmentAvatarLoaded = false;
+        this.environmentAvatarError = null;
+        this.environmentAvatarDrafts = [];
+        this.environmentAvatarStatuses.clear();
+        this.environmentAvatarToolbarStatus = null;
+        this.selectedEnvironmentAvatarId = null;
+        this.environmentPlacementMode = null;
+        this.clearEnvironmentToast();
         this.avatarPreviewCanvases = [];
         this.mediaState = {
             audioEnabled: false,
@@ -213,6 +283,11 @@ export class SettingsOverlay {
 
     private attachEscapeListener(): () => void {
         const onKeyDown = (event: KeyboardEvent): void => {
+            if (event.key === "Escape" && this.environmentPlacementMode) {
+                event.preventDefault();
+                this.currentArgs?.onEnvironmentAvatarPlacementCancel?.();
+                return;
+            }
             if (event.key === "Escape" && !this.busy) {
                 event.preventDefault();
                 this.close();
@@ -227,11 +302,18 @@ export class SettingsOverlay {
             return;
         }
 
+        this.applyPlacementLayout(!!this.environmentPlacementMode);
+
         this.content.innerHTML = "";
         this.mediaStatus = undefined;
         this.languageStatus = undefined;
         this.characterStatus = undefined;
         this.promptStatus = undefined;
+
+        if (this.environmentPlacementMode) {
+            this.renderPlacementModeContent();
+            return;
+        }
 
         const header = document.createElement("div");
         header.style.marginBottom = "22px";
@@ -266,7 +348,93 @@ export class SettingsOverlay {
             return;
         }
 
+        if (this.activeTab === "environment-avatars") {
+            this.renderEnvironmentAvatarTab();
+            return;
+        }
+
         this.renderPromptTab();
+    }
+
+    private renderPlacementModeContent(): void {
+        if (!this.content) {
+            return;
+        }
+
+        const card = this.createCard();
+        card.style.padding = "22px";
+        card.style.background = "rgba(20, 24, 34, 0.92)";
+        card.style.border = "1px solid rgba(255, 214, 140, 0.28)";
+
+        const help = document.createElement("div");
+        help.textContent = this.getPlacementHelpText();
+        help.style.color = "#fff0ca";
+        help.style.fontSize = "14px";
+        help.style.lineHeight = "1.6";
+        help.style.whiteSpace = "pre-line";
+        help.style.marginBottom = "18px";
+
+        const actions = document.createElement("div");
+        actions.style.display = "flex";
+        actions.style.justifyContent = "flex-start";
+
+        const cancelPlacementButton = this.createActionButton(this.t("settings.environment.cancelPlacement"), "rgba(255, 214, 140, 0.16)", "#fff3d6");
+        cancelPlacementButton.dataset.allowWhilePlacement = "true";
+        cancelPlacementButton.onclick = () => {
+            this.currentArgs?.onEnvironmentAvatarPlacementCancel?.();
+        };
+
+        actions.appendChild(cancelPlacementButton);
+        card.appendChild(help);
+        card.appendChild(actions);
+        this.content.appendChild(card);
+    }
+
+    private getPlacementHelpText(): string {
+        const helpText = this.t(
+            this.environmentPlacementMode === "position"
+                ? "settings.environment.positionPlacementHelp"
+                : "settings.environment.walkPlacementHelp"
+        );
+        if (this.environmentPlacementMode !== "walk-area") {
+            return helpText;
+        }
+        return [
+            helpText,
+            this.t("settings.environment.walkPlacementLegendCurrent"),
+            this.t("settings.environment.walkPlacementLegendPending")
+        ].join("\n");
+    }
+
+    private getAvailableTabs(args: SettingsOverlayOpenArgs = this.currentArgs!): SettingsTabId[] {
+        const tabs: SettingsTabId[] = ["media", "language", "character", "ai-prompt"];
+        if (args?.canManageEnvironmentAvatars) {
+            tabs.push("environment-avatars");
+        }
+        return tabs;
+    }
+
+    private async ensureEnvironmentAvatarsLoaded(): Promise<void> {
+        if (!this.currentArgs?.canManageEnvironmentAvatars || !this.currentArgs.loadEnvironmentAvatars) {
+            return;
+        }
+        if (this.environmentAvatarLoaded || this.environmentAvatarLoading) {
+            return;
+        }
+
+        this.environmentAvatarLoading = true;
+        this.environmentAvatarError = null;
+
+        try {
+            this.environmentAvatarDrafts = await this.currentArgs.loadEnvironmentAvatars();
+            this.environmentAvatarLoaded = true;
+            this.ensureSelectedEnvironmentAvatar();
+        } catch (error) {
+            this.environmentAvatarError = error instanceof Error ? error.message : this.t("settings.environment.failedLoad");
+        } finally {
+            this.environmentAvatarLoading = false;
+            this.renderContent();
+        }
     }
 
     private async renderMediaTab(): Promise<void> {
@@ -553,7 +721,6 @@ export class SettingsOverlay {
         helper.style.color = "#bac7e8";
 
         const select = document.createElement("select");
-        select.value = this.selectedLanguage;
         select.style.width = "100%";
         select.style.padding = "12px 14px";
         select.style.borderRadius = "12px";
@@ -567,6 +734,7 @@ export class SettingsOverlay {
             option.textContent = this.t(`language.option.${language}`);
             select.appendChild(option);
         });
+        select.value = this.selectedLanguage;
         select.onchange = () => {
             this.selectedLanguage = select.value as AppLanguage;
         };
@@ -829,6 +997,683 @@ export class SettingsOverlay {
         }
     }
 
+    private renderEnvironmentAvatarTab(): void {
+        if (!this.content || !this.currentArgs) {
+            return;
+        }
+
+        const card = this.createCard();
+        const intro = document.createElement("p");
+        intro.textContent = this.t("settings.environment.intro");
+        intro.style.margin = "0 0 18px";
+        intro.style.color = "#cbd5f5";
+        intro.style.lineHeight = "1.6";
+        card.appendChild(intro);
+
+        if (!this.currentArgs.canManageEnvironmentAvatars) {
+            const denied = document.createElement("div");
+            denied.textContent = this.t("settings.environment.adminRequired");
+            denied.style.color = "#ffd0c7";
+            denied.style.fontSize = "13px";
+            card.appendChild(denied);
+            this.content.appendChild(card);
+            return;
+        }
+
+        if (!this.environmentAvatarLoaded && !this.environmentAvatarLoading) {
+            void this.ensureEnvironmentAvatarsLoaded();
+            const loading = document.createElement("div");
+            loading.textContent = this.t("settings.environment.loading");
+            loading.style.color = "#d7e2ff";
+            card.appendChild(loading);
+            this.content.appendChild(card);
+            return;
+        }
+
+        if (this.environmentAvatarLoading) {
+            const loading = document.createElement("div");
+            loading.textContent = this.t("settings.environment.loading");
+            loading.style.color = "#d7e2ff";
+            card.appendChild(loading);
+            this.content.appendChild(card);
+            return;
+        }
+
+        if (this.environmentAvatarError) {
+            const error = document.createElement("div");
+            error.textContent = this.environmentAvatarError;
+            error.style.color = "#ffd0c7";
+            error.style.fontSize = "13px";
+            card.appendChild(error);
+            this.content.appendChild(card);
+            return;
+        }
+
+        const toolbar = document.createElement("div");
+        toolbar.style.display = "grid";
+        toolbar.style.gap = "12px";
+        toolbar.style.marginBottom = "18px";
+
+        const toolbarRow = document.createElement("div");
+        toolbarRow.style.display = "grid";
+        toolbarRow.style.gridTemplateColumns = "minmax(0, 1fr) auto";
+        toolbarRow.style.gap = "12px";
+        toolbarRow.style.alignItems = "end";
+
+        const selectorField = document.createElement("div");
+        selectorField.style.display = "grid";
+        selectorField.style.gap = "8px";
+
+        const selectorLabel = document.createElement("label");
+        selectorLabel.textContent = this.t("settings.environment.selector");
+        selectorLabel.style.fontWeight = "600";
+        selectorLabel.style.fontSize = "14px";
+
+        const selector = document.createElement("select");
+        selector.style.width = "100%";
+        selector.style.boxSizing = "border-box";
+        selector.style.padding = "12px 14px";
+        selector.style.borderRadius = "12px";
+        selector.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        selector.style.background = "rgba(8, 12, 20, 0.72)";
+        selector.style.color = "#eef3ff";
+        selector.style.font = `14px ${getUiFontStack(this.language)}`;
+        this.environmentAvatarDrafts.forEach(avatar => {
+            const option = document.createElement("option");
+            option.value = avatar.agentId;
+            option.textContent = `${avatar.displayName} (${avatar.agentId})`;
+            selector.appendChild(option);
+        });
+        this.ensureSelectedEnvironmentAvatar();
+        selector.value = this.selectedEnvironmentAvatarId ?? "";
+        selector.onchange = () => {
+            this.selectedEnvironmentAvatarId = selector.value || null;
+            this.renderContent();
+        };
+
+        selectorField.appendChild(selectorLabel);
+        selectorField.appendChild(selector);
+        toolbarRow.appendChild(selectorField);
+
+        const createButton = this.createActionButton(this.t("settings.environment.create"), "rgba(76, 203, 145, 0.18)", "#ecfff5");
+        createButton.style.alignSelf = "end";
+        createButton.onclick = async () => {
+            if (!this.currentArgs?.onEnvironmentAvatarCreate || this.busy || this.environmentPlacementMode) {
+                return;
+            }
+            this.busy = true;
+            this.environmentAvatarToolbarStatus = this.t("settings.environment.creating");
+            this.updateDisabledState();
+            try {
+                const selectedAvatar = this.getSelectedEnvironmentAvatar();
+                const created = await this.currentArgs.onEnvironmentAvatarCreate(selectedAvatar ? {
+                    displayName: this.t("settings.environment.newDisplayName"),
+                    spriteIndex: selectedAvatar.spriteIndex,
+                    caption: selectedAvatar.caption,
+                    defaultSystemPrompt: selectedAvatar.defaultSystemPrompt,
+                    position: { ...selectedAvatar.position },
+                    walkArea: selectedAvatar.walkArea ? { ...selectedAvatar.walkArea } : undefined,
+                    spawnByDefault: selectedAvatar.spawnByDefault,
+                    characterRole: selectedAvatar.characterRole
+                } : {
+                    displayName: this.t("settings.environment.newDisplayName"),
+                    spriteIndex: 0,
+                    caption: "Press E to chat",
+                    defaultSystemPrompt: "",
+                    position: { x: 128, y: 1088 },
+                    walkArea: { x: 128, y: 1088, width: 80, height: 80 },
+                    spawnByDefault: true,
+                    characterRole: "custom"
+                });
+                this.environmentAvatarDrafts = this.environmentAvatarDrafts.concat(created)
+                    .sort((left, right) => left.displayName.localeCompare(right.displayName));
+                this.selectedEnvironmentAvatarId = created.agentId;
+                this.environmentAvatarStatuses.set(created.agentId, this.t("settings.environment.created"));
+                this.environmentAvatarToolbarStatus = this.t("settings.environment.created");
+            } catch (error) {
+                this.environmentAvatarToolbarStatus = error instanceof Error ? error.message : this.t("settings.environment.failedCreate");
+            } finally {
+                this.busy = false;
+                this.renderContent();
+            }
+        };
+        toolbarRow.appendChild(createButton);
+        toolbar.appendChild(toolbarRow);
+
+        const toolbarStatus = document.createElement("div");
+        toolbarStatus.textContent = this.environmentAvatarToolbarStatus ?? "";
+        toolbarStatus.style.minHeight = "20px";
+        toolbarStatus.style.fontSize = "13px";
+        toolbarStatus.style.color = this.environmentAvatarToolbarStatus?.includes("failed") || this.environmentAvatarToolbarStatus?.includes("失败")
+            ? "#ffd0c7"
+            : "#d7e2ff";
+        toolbar.appendChild(toolbarStatus);
+
+        if (this.environmentPlacementMode) {
+            const placementBanner = document.createElement("div");
+            placementBanner.style.display = "flex";
+            placementBanner.style.justifyContent = "space-between";
+            placementBanner.style.alignItems = "center";
+            placementBanner.style.gap = "12px";
+            placementBanner.style.flexWrap = "wrap";
+            placementBanner.style.padding = "14px 16px";
+            placementBanner.style.borderRadius = "14px";
+            placementBanner.style.border = "1px solid rgba(255, 214, 140, 0.2)";
+            placementBanner.style.background = "rgba(255, 214, 140, 0.08)";
+
+            const placementText = document.createElement("div");
+            placementText.textContent = this.getPlacementHelpText();
+            placementText.style.color = "#ffe8be";
+            placementText.style.fontSize = "13px";
+            placementText.style.lineHeight = "1.5";
+            placementText.style.whiteSpace = "pre-line";
+
+            const placementTextWrap = document.createElement("div");
+            placementTextWrap.style.display = "flex";
+            placementTextWrap.style.flexDirection = "column";
+            placementTextWrap.style.alignItems = "flex-start";
+            placementTextWrap.style.gap = "10px";
+            placementTextWrap.style.flex = "1 1 320px";
+            placementTextWrap.appendChild(placementText);
+
+            const cancelPlacementButton = this.createActionButton(this.t("settings.environment.cancelPlacement"), "rgba(255, 214, 140, 0.16)", "#fff3d6");
+            cancelPlacementButton.onclick = () => {
+                this.currentArgs?.onEnvironmentAvatarPlacementCancel?.();
+            };
+
+            placementBanner.appendChild(placementTextWrap);
+            placementBanner.appendChild(cancelPlacementButton);
+            toolbar.appendChild(placementBanner);
+        }
+
+        card.appendChild(toolbar);
+
+        if (this.environmentAvatarDrafts.length === 0) {
+            const empty = document.createElement("div");
+            empty.textContent = this.t("settings.environment.empty");
+            empty.style.color = "#d7e2ff";
+            empty.style.fontSize = "13px";
+            card.appendChild(empty);
+            this.content.appendChild(card);
+            return;
+        }
+
+        const selectedAvatar = this.getSelectedEnvironmentAvatar();
+        if (selectedAvatar) {
+            card.appendChild(this.createEnvironmentAvatarEditorCard(selectedAvatar));
+        }
+        this.content.appendChild(card);
+    }
+
+    private createEnvironmentAvatarEditorCard(avatar: EditableEnvironmentAvatar): HTMLDivElement {
+        const wrapper = document.createElement("div");
+        wrapper.style.display = "grid";
+        wrapper.style.gap = "14px";
+        wrapper.style.padding = "18px";
+        wrapper.style.borderRadius = "16px";
+        wrapper.style.border = "1px solid rgba(164, 190, 255, 0.14)";
+        wrapper.style.background = "rgba(8, 12, 20, 0.28)";
+
+        const titleRow = document.createElement("div");
+        titleRow.style.display = "flex";
+        titleRow.style.justifyContent = "space-between";
+        titleRow.style.alignItems = "baseline";
+        titleRow.style.gap = "12px";
+        titleRow.style.flexWrap = "wrap";
+
+        const title = document.createElement("div");
+        title.textContent = avatar.displayName;
+        title.style.fontSize = "18px";
+        title.style.fontWeight = "700";
+
+        const meta = document.createElement("div");
+        meta.textContent = `${this.t("settings.environment.agentId")}: ${avatar.agentId} · ${avatar.provider}/${avatar.model}`;
+        meta.style.fontSize = "12px";
+        meta.style.color = "#9fb0d8";
+
+        titleRow.appendChild(title);
+        titleRow.appendChild(meta);
+        wrapper.appendChild(titleRow);
+
+        const grid = document.createElement("div");
+        grid.style.display = "grid";
+        grid.style.gridTemplateColumns = "repeat(auto-fit, minmax(180px, 1fr))";
+        grid.style.gap = "12px";
+
+        grid.appendChild(this.createTextInputField(this.t("settings.environment.displayName"), avatar.displayName, value => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { displayName: value });
+            title.textContent = value || avatar.displayName;
+        }));
+        grid.appendChild(this.createNumberInputField(this.t("settings.environment.spriteIndex"), avatar.spriteIndex, value => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { spriteIndex: value });
+        }, 0, 0));
+        grid.appendChild(this.createTextInputField(this.t("settings.environment.caption"), avatar.caption ?? "", value => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { caption: value });
+        }));
+        grid.appendChild(this.createCheckboxField(this.t("settings.environment.spawnByDefault"), avatar.spawnByDefault !== false, checked => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { spawnByDefault: checked });
+        }));
+
+        const walkArea = avatar.walkArea ?? {
+            x: avatar.position.x,
+            y: avatar.position.y,
+            width: 50,
+            height: 50
+        };
+        grid.appendChild(this.createNumberInputField(this.t("settings.environment.walkX"), walkArea.x, value => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { walkArea: { ...this.getEnvironmentWalkArea(avatar.agentId), x: value } });
+        }));
+        grid.appendChild(this.createNumberInputField(this.t("settings.environment.walkY"), walkArea.y, value => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { walkArea: { ...this.getEnvironmentWalkArea(avatar.agentId), y: value } });
+        }));
+        grid.appendChild(this.createNumberInputField(this.t("settings.environment.walkWidth"), walkArea.width, value => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { walkArea: { ...this.getEnvironmentWalkArea(avatar.agentId), width: value } });
+        }, 0, 0));
+        grid.appendChild(this.createNumberInputField(this.t("settings.environment.walkHeight"), walkArea.height, value => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { walkArea: { ...this.getEnvironmentWalkArea(avatar.agentId), height: value } });
+        }, 0, 0));
+
+        wrapper.appendChild(grid);
+
+        const placementActions = document.createElement("div");
+        placementActions.style.display = "flex";
+        placementActions.style.gap = "10px";
+        placementActions.style.flexWrap = "wrap";
+
+        const placeWalkButton = this.createActionButton(this.t("settings.environment.placeWalkArea"), "rgba(111, 208, 184, 0.16)", "#e9fff8");
+        placeWalkButton.onclick = async () => {
+            await this.startEnvironmentAvatarPlacement(avatar.agentId, "walk-area");
+        };
+
+        placementActions.appendChild(placeWalkButton);
+        wrapper.appendChild(placementActions);
+
+        const promptField = document.createElement("div");
+        promptField.style.display = "grid";
+        promptField.style.gap = "8px";
+
+        const promptLabel = document.createElement("label");
+        promptLabel.textContent = this.t("settings.environment.prompt");
+        promptLabel.style.fontWeight = "600";
+        promptLabel.style.fontSize = "14px";
+
+        const promptArea = document.createElement("textarea");
+        promptArea.value = avatar.defaultSystemPrompt ?? "";
+        promptArea.rows = 6;
+        promptArea.style.width = "100%";
+        promptArea.style.boxSizing = "border-box";
+        promptArea.style.padding = "14px";
+        promptArea.style.borderRadius = "14px";
+        promptArea.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        promptArea.style.background = "rgba(8, 12, 20, 0.72)";
+        promptArea.style.color = "#eef3ff";
+        promptArea.style.font = `14px/1.6 ${getCodeFontStack(this.language)}`;
+        promptArea.style.resize = "vertical";
+        promptArea.oninput = () => {
+            this.updateEnvironmentAvatarDraft(avatar.agentId, { defaultSystemPrompt: promptArea.value });
+        };
+
+        promptField.appendChild(promptLabel);
+        promptField.appendChild(promptArea);
+        wrapper.appendChild(promptField);
+
+        const status = document.createElement("div");
+        status.textContent = this.environmentAvatarStatuses.get(avatar.agentId) ?? "";
+        status.style.minHeight = "20px";
+        status.style.fontSize = "13px";
+        status.style.color = "#d7e2ff";
+        wrapper.appendChild(status);
+
+        const actions = document.createElement("div");
+        actions.style.display = "flex";
+        actions.style.justifyContent = "flex-end";
+
+        const saveButton = this.createActionButton(this.t("settings.environment.save"), "rgba(72, 126, 255, 0.26)", "#eef3ff");
+        saveButton.onclick = async () => {
+            if (!this.currentArgs?.onEnvironmentAvatarSave || this.busy) {
+                return;
+            }
+            const currentDraft = this.getEnvironmentAvatarDraftById(avatar.agentId);
+            if (!currentDraft) {
+                return;
+            }
+            this.busy = true;
+            this.environmentAvatarStatuses.set(avatar.agentId, this.t("settings.environment.saving"));
+            this.renderContent();
+            try {
+                const saved = await this.currentArgs.onEnvironmentAvatarSave(currentDraft);
+                const draftIndex = this.environmentAvatarDrafts.findIndex(entry => entry.agentId === avatar.agentId);
+                if (draftIndex >= 0) {
+                    this.environmentAvatarDrafts.splice(draftIndex, 1, saved);
+                }
+                this.selectedEnvironmentAvatarId = saved.agentId;
+                this.environmentAvatarStatuses.set(saved.agentId, this.t("settings.environment.saved"));
+            } catch (error) {
+                this.environmentAvatarStatuses.set(avatar.agentId, error instanceof Error ? error.message : this.t("settings.environment.failedSave"));
+            } finally {
+                this.busy = false;
+                this.renderContent();
+            }
+        };
+
+        actions.appendChild(saveButton);
+        wrapper.appendChild(actions);
+        return wrapper;
+    }
+
+    private getEnvironmentWalkArea(agentId: string): { x: number; y: number; width: number; height: number } {
+        const avatar = this.getEnvironmentAvatarDraftById(agentId);
+        if (!avatar) {
+            return { x: 0, y: 0, width: 50, height: 50 };
+        }
+        return avatar.walkArea ?? {
+            x: avatar.position.x,
+            y: avatar.position.y,
+            width: 50,
+            height: 50
+        };
+    }
+
+    private getEnvironmentAvatarDraftById(agentId: string): EditableEnvironmentAvatar | null {
+        return this.environmentAvatarDrafts.find(avatar => avatar.agentId === agentId) ?? null;
+    }
+
+    private ensureSelectedEnvironmentAvatar(): void {
+        if (this.environmentAvatarDrafts.length === 0) {
+            this.selectedEnvironmentAvatarId = null;
+            return;
+        }
+        if (!this.selectedEnvironmentAvatarId || !this.environmentAvatarDrafts.some(avatar => avatar.agentId === this.selectedEnvironmentAvatarId)) {
+            this.selectedEnvironmentAvatarId = this.environmentAvatarDrafts[0].agentId;
+        }
+    }
+
+    private getSelectedEnvironmentAvatar(): EditableEnvironmentAvatar | null {
+        this.ensureSelectedEnvironmentAvatar();
+        return this.selectedEnvironmentAvatarId
+            ? this.getEnvironmentAvatarDraftById(this.selectedEnvironmentAvatarId)
+            : null;
+    }
+
+    private updateEnvironmentAvatarDraft(agentId: string, patch: Partial<EditableEnvironmentAvatar>): void {
+        const index = this.environmentAvatarDrafts.findIndex(avatar => avatar.agentId === agentId);
+        const current = index >= 0 ? this.environmentAvatarDrafts[index] : null;
+        if (!current) {
+            return;
+        }
+        const nextWalkArea = patch.walkArea
+            ? { ...patch.walkArea }
+            : current.walkArea
+                ? { ...current.walkArea }
+                : undefined;
+        const nextPosition = patch.position
+            ? { ...patch.position }
+            : nextWalkArea
+                ? this.getEnvironmentAvatarPositionFromWalkArea(nextWalkArea)
+                : { ...current.position };
+        this.environmentAvatarDrafts.splice(index, 1, {
+            ...current,
+            ...patch,
+            position: nextPosition,
+            walkArea: nextWalkArea
+        });
+    }
+
+    private getEnvironmentAvatarPositionFromWalkArea(walkArea: { x: number; y: number; width: number; height: number }): { x: number; y: number } {
+        return {
+            x: Math.round(walkArea.x + walkArea.width / 2),
+            y: Math.round(walkArea.y + walkArea.height / 2)
+        };
+    }
+
+    private async startEnvironmentAvatarPlacement(agentId: string, mode: EnvironmentAvatarPlacementMode): Promise<void> {
+        if (!this.currentArgs?.onEnvironmentAvatarPlacementStart || this.busy || this.environmentPlacementMode) {
+            return;
+        }
+
+        const avatar = this.getEnvironmentAvatarDraftById(agentId);
+        if (!avatar) {
+            return;
+        }
+
+        this.environmentPlacementMode = mode;
+        this.environmentAvatarToolbarStatus = this.t(
+            mode === "position"
+                ? "settings.environment.positionPlacementStarted"
+                : "settings.environment.walkPlacementStarted"
+        );
+        this.setPlacementPassThrough(true);
+        this.renderContent();
+        this.updateDisabledState();
+
+        try {
+            const result = await this.currentArgs.onEnvironmentAvatarPlacementStart({
+                ...avatar,
+                position: { ...avatar.position },
+                walkArea: avatar.walkArea ? { ...avatar.walkArea } : undefined
+            }, mode);
+
+            if (result?.position) {
+                this.updateEnvironmentAvatarDraft(agentId, { position: { ...result.position } });
+            }
+            if (result?.walkArea) {
+                this.updateEnvironmentAvatarDraft(agentId, { walkArea: { ...result.walkArea } });
+            }
+
+            if (!result) {
+                this.environmentAvatarToolbarStatus = this.t("settings.environment.placementCanceled");
+            } else if (this.currentArgs.onEnvironmentAvatarSave) {
+                const updatedDraft = this.getEnvironmentAvatarDraftById(agentId);
+                if (!updatedDraft) {
+                    this.environmentAvatarToolbarStatus = this.t("settings.environment.failedSave");
+                } else {
+                    this.environmentAvatarToolbarStatus = this.t("settings.environment.saving");
+                    this.renderContent();
+                    const saved = await this.currentArgs.onEnvironmentAvatarSave(updatedDraft);
+                    const draftIndex = this.environmentAvatarDrafts.findIndex(entry => entry.agentId === agentId);
+                    if (draftIndex >= 0) {
+                        this.environmentAvatarDrafts.splice(draftIndex, 1, saved);
+                    }
+                    this.selectedEnvironmentAvatarId = saved.agentId;
+                    this.environmentAvatarStatuses.set(saved.agentId, this.t("settings.environment.saved"));
+                    const successMessage = this.t(
+                        mode === "position"
+                            ? "settings.environment.positionPlaced"
+                            : "settings.environment.walkPlaced"
+                    );
+                    this.environmentAvatarToolbarStatus = successMessage;
+                    this.showEnvironmentToast(successMessage, "success");
+                }
+            } else {
+                this.environmentAvatarToolbarStatus = this.t(mode === "position" ? "settings.environment.positionPlaced" : "settings.environment.walkPlaced");
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : this.t("settings.environment.placementFailed");
+            this.environmentAvatarToolbarStatus = errorMessage;
+            this.showEnvironmentToast(errorMessage, "error");
+        } finally {
+            this.environmentPlacementMode = null;
+            this.setPlacementPassThrough(false);
+            this.renderContent();
+            this.updateDisabledState();
+        }
+    }
+
+    private showEnvironmentToast(message: string, tone: "success" | "error"): void {
+        this.clearEnvironmentToast();
+
+        const toast = document.createElement("div");
+        toast.textContent = message;
+        toast.style.position = "fixed";
+        toast.style.right = "24px";
+        toast.style.bottom = "24px";
+        toast.style.maxWidth = "min(360px, calc(100vw - 48px))";
+        toast.style.padding = "12px 14px";
+        toast.style.borderRadius = "14px";
+        toast.style.border = tone === "success"
+            ? "1px solid rgba(111, 208, 184, 0.28)"
+            : "1px solid rgba(255, 148, 133, 0.28)";
+        toast.style.background = tone === "success"
+            ? "rgba(14, 35, 31, 0.92)"
+            : "rgba(42, 18, 18, 0.94)";
+        toast.style.color = "#eef3ff";
+        toast.style.font = `600 13px ${getUiFontStack(this.language)}`;
+        toast.style.lineHeight = "1.5";
+        toast.style.boxShadow = "0 18px 40px rgba(0, 0, 0, 0.28)";
+        toast.style.zIndex = String(Number(OVERLAY_Z_INDEX) + 1);
+
+        document.body.appendChild(toast);
+        this.environmentToast = toast;
+        this.environmentToastTimeoutId = window.setTimeout(() => {
+            this.clearEnvironmentToast();
+        }, 2200);
+    }
+
+    private clearEnvironmentToast(): void {
+        if (this.environmentToastTimeoutId != null) {
+            window.clearTimeout(this.environmentToastTimeoutId);
+            this.environmentToastTimeoutId = null;
+        }
+        this.environmentToast?.remove();
+        this.environmentToast = undefined;
+    }
+
+    private setPlacementPassThrough(active: boolean): void {
+        if (this.backdrop) {
+            this.backdrop.style.pointerEvents = active ? "none" : "auto";
+            this.backdrop.style.background = active ? "rgba(6, 10, 18, 0.08)" : "rgba(6, 10, 18, 0.72)";
+            this.backdrop.style.setProperty("backdrop-filter", active ? "none" : "blur(10px)");
+        }
+        if (this.panel) {
+            this.panel.style.pointerEvents = "auto";
+        }
+    }
+
+    private applyPlacementLayout(active: boolean): void {
+        if (!this.backdrop || !this.panel || !this.sidebar || !this.content) {
+            return;
+        }
+
+        if (active) {
+            this.backdrop.style.alignItems = "flex-start";
+            this.backdrop.style.justifyContent = "flex-end";
+            this.backdrop.style.padding = "16px";
+            this.panel.style.width = "min(460px, calc(100vw - 32px))";
+            this.panel.style.height = "auto";
+            this.panel.style.maxHeight = "calc(100vh - 32px)";
+            this.panel.style.gridTemplateColumns = "minmax(0, 1fr)";
+            this.panel.style.borderRadius = "18px";
+            this.sidebar.style.display = "none";
+            this.content.style.padding = "16px";
+            this.content.style.overflowY = "scroll";
+            this.content.style.overflowX = "hidden";
+            return;
+        }
+
+        this.backdrop.style.alignItems = "center";
+        this.backdrop.style.justifyContent = "center";
+        this.backdrop.style.padding = "20px";
+        this.panel.style.width = "min(980px, calc(100vw - 32px))";
+        this.panel.style.height = "calc(100vh - 32px)";
+        this.panel.style.maxHeight = "calc(100vh - 32px)";
+        this.panel.style.gridTemplateColumns = "220px minmax(0, 1fr)";
+        this.panel.style.borderRadius = "22px";
+        this.sidebar.style.display = "block";
+        this.content.style.padding = "28px";
+        this.content.style.overflowY = "scroll";
+        this.content.style.overflowX = "hidden";
+    }
+
+    private createTextInputField(labelText: string, value: string, onChange: (value: string) => void): HTMLDivElement {
+        const field = document.createElement("div");
+        field.style.display = "grid";
+        field.style.gap = "8px";
+
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        label.style.fontWeight = "600";
+        label.style.fontSize = "14px";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = value;
+        input.style.width = "100%";
+        input.style.boxSizing = "border-box";
+        input.style.padding = "12px 14px";
+        input.style.borderRadius = "12px";
+        input.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        input.style.background = "rgba(8, 12, 20, 0.72)";
+        input.style.color = "#eef3ff";
+        input.style.font = `14px ${getUiFontStack(this.language)}`;
+        input.oninput = () => onChange(input.value);
+
+        field.appendChild(label);
+        field.appendChild(input);
+        return field;
+    }
+
+    private createNumberInputField(labelText: string, value: number, onChange: (value: number) => void, min?: number, step = 1): HTMLDivElement {
+        const field = document.createElement("div");
+        field.style.display = "grid";
+        field.style.gap = "8px";
+
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        label.style.fontWeight = "600";
+        label.style.fontSize = "14px";
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.value = String(value);
+        if (min != null) {
+            input.min = String(min);
+        }
+        input.step = String(step);
+        input.style.width = "100%";
+        input.style.boxSizing = "border-box";
+        input.style.padding = "12px 14px";
+        input.style.borderRadius = "12px";
+        input.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        input.style.background = "rgba(8, 12, 20, 0.72)";
+        input.style.color = "#eef3ff";
+        input.style.font = `14px ${getUiFontStack(this.language)}`;
+        input.oninput = () => {
+            const nextValue = Number(input.value);
+            if (Number.isFinite(nextValue)) {
+                onChange(nextValue);
+            }
+        };
+
+        field.appendChild(label);
+        field.appendChild(input);
+        return field;
+    }
+
+    private createCheckboxField(labelText: string, checked: boolean, onChange: (checked: boolean) => void): HTMLLabelElement {
+        const field = document.createElement("label");
+        field.style.display = "flex";
+        field.style.alignItems = "center";
+        field.style.gap = "10px";
+        field.style.padding = "12px 14px";
+        field.style.borderRadius = "12px";
+        field.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        field.style.background = "rgba(8, 12, 20, 0.48)";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = checked;
+        input.onchange = () => onChange(input.checked);
+
+        const label = document.createElement("span");
+        label.textContent = labelText;
+        label.style.fontWeight = "600";
+        label.style.fontSize = "14px";
+
+        field.appendChild(input);
+        field.appendChild(label);
+        return field;
+    }
+
     private refreshTabButtonStates(): void {
         if (!this.panel) {
             return;
@@ -859,27 +1704,36 @@ export class SettingsOverlay {
         if (!this.backdrop) {
             return;
         }
+        const disabled = this.busy || !!this.environmentPlacementMode;
         const buttons = this.backdrop.querySelectorAll<HTMLButtonElement>("button");
         buttons.forEach(button => {
-            if (button.dataset.settingsTab) {
+            if (button.dataset.allowWhilePlacement === "true") {
                 button.disabled = this.busy;
+                return;
+            }
+            if (button.dataset.settingsTab) {
+                button.disabled = disabled;
                 return;
             }
             if (button.textContent === "Close") {
-                button.disabled = this.busy;
+                button.disabled = disabled;
                 return;
             }
-            button.disabled = this.busy;
+            button.disabled = disabled;
         });
         const selects = this.backdrop.querySelectorAll<HTMLSelectElement>("select");
         selects.forEach(select => {
             if (select.options.length > 0 && select.options[0].value !== "") {
-                select.disabled = this.busy;
+                select.disabled = disabled;
             }
         });
         const textareas = this.backdrop.querySelectorAll<HTMLTextAreaElement>("textarea");
         textareas.forEach(textarea => {
-            textarea.disabled = this.busy;
+            textarea.disabled = disabled;
+        });
+        const inputs = this.backdrop.querySelectorAll<HTMLInputElement>("input");
+        inputs.forEach(input => {
+            input.disabled = disabled;
         });
         this.refreshTabButtonStates();
     }
@@ -925,6 +1779,8 @@ export class SettingsOverlay {
                 return this.t("settings.tab.language");
             case "character":
                 return this.t("settings.tab.character");
+            case "environment-avatars":
+                return this.t("settings.tab.environment");
             default:
                 return this.t("settings.tab.aiPrompt");
         }
@@ -938,6 +1794,8 @@ export class SettingsOverlay {
                 return this.t("settings.description.language");
             case "character":
                 return this.t("settings.description.character");
+            case "environment-avatars":
+                return this.t("settings.description.environment");
             default:
                 return this.t("settings.description.aiPrompt");
         }

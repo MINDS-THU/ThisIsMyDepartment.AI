@@ -36,7 +36,7 @@ npm start
 Notes:
 
 * the legacy frontend stack in this repository is tied to older Node tooling
-* this repo has previously been validated with Node 16.20.2 via Volta
+* the root package still carries a Node `16.20.2` Volta pin for the legacy frontend toolchain
 * the root `npm install` now also installs backend dependencies under `server/`
 
 ### Backend
@@ -62,6 +62,11 @@ server/data/state.sqlite
 ```
 
 If `better-sqlite3` needs a native rebuild on macOS under Node 16, ensure `python` is available in `PATH`. Systems that only provide `python3` may need a temporary `python` shim for the rebuild step.
+
+Operational note:
+
+* the backend dependency `better-sqlite3@12.x` advertises newer Node engines than the legacy frontend stack
+* for production and CI, treat backend runtime selection as an explicit deployment decision rather than assuming the root frontend Node pin is the correct backend runtime too
 
 ## Important environment variables
 
@@ -138,9 +143,13 @@ Use [server/.env.production.example](server/.env.production.example) as the base
 
 Currently implemented:
 
+* `TIMD_AGENT_LLM_PROVIDER`
+* `OPENROUTER_API_KEY`
+* `OPENROUTER_MODEL`
 * `OPENAI_API_KEY`
+* `OPENAI_MODEL`
 
-If this is not set, the backend falls back to the mock provider path for the configured agents that use mock settings.
+If neither provider key is set, the backend falls back to the mock provider path.
 
 Example production environment:
 
@@ -314,4 +323,6 @@ Example parent page flow for the `postMessage` bridge:
 
 These areas still need more release polish:
 
-* provider configuration docs beyond the current mock plus OpenAI paths
+* runtime guidance is still more complex than it should be because the frontend and backend do not yet share a clean single Node baseline
+* provider configuration docs should continue to improve around OpenRouter and multi-provider operations
+* public deployment validation should cover both cookie-based auth flows and websocket traffic behind a reverse proxy

@@ -13,10 +13,10 @@ Both are required for the normal backend-driven app flow.
 
 ## Requirements
 
-Use these versions unless you are intentionally modernizing the stack:
+Current practical runtime guidance:
 
-* Node `16.20.2`
-* npm compatible with that Node version
+* the root frontend toolchain was last validated with Node `16.20.2`
+* the backend currently uses `better-sqlite3@12.x`, which targets newer Node releases such as Node `20` or `22`
 * a shell environment where native module builds can run
 
 Recommended tools:
@@ -28,6 +28,7 @@ macOS note:
 
 * the backend uses `better-sqlite3`
 * if native rebuilds fail because `python` is missing, provide a temporary `python` shim that points to `python3`
+* if you switch Node versions between frontend and backend work, rebuild the backend native module under the runtime you will actually use to start the backend
 
 ## Install
 
@@ -38,6 +39,11 @@ npm install
 ```
 
 That installs the root frontend dependencies and also installs the backend package under `server/` via the root `postinstall` script.
+
+Important note:
+
+* because the frontend and backend currently have different runtime expectations, switching Node versions after install can leave the backend SQLite binding in a broken state
+* if that happens, rerun `npm --prefix server rebuild better-sqlite3` under the backend runtime before starting the server
 
 ## Configure runtime variables
 
@@ -136,6 +142,7 @@ Current important behavior:
 * the frontend dev server serves emitted files from `lib/`
 * if a source change appears missing in the browser, verify the matching file in `lib/` was regenerated
 * on localhost, Jitsi stays disabled unless explicit `TIMD_JITSI_*` variables are configured
+* the backend chooses LLM routing from `TIMD_AGENT_LLM_PROVIDER`, `OPENROUTER_API_KEY`, and `OPENAI_API_KEY`, with mock mode as the fallback
 
 ## What to verify after startup
 
@@ -147,6 +154,7 @@ Use this list to confirm the local stack is healthy:
 * first-time users see avatar onboarding
 * returning users keep the saved avatar
 * AI characters can be opened for chat
+* scene navigation and avatar summoning UI can load without panel layout regressions
 * player-to-player room sync works when two browser sessions join the same room
 
 ## Basic usage
@@ -195,7 +203,11 @@ Backend runtime:
 * `AUTH_SESSION_COOKIE_NAME`
 * `AUTH_SESSION_TTL_SECONDS`
 * `SERVER_STATE_DB_FILE`
+* `TIMD_AGENT_LLM_PROVIDER`
+* `OPENROUTER_API_KEY`
+* `OPENROUTER_MODEL`
 * `OPENAI_API_KEY`
+* `OPENAI_MODEL`
 
 Auth integration:
 

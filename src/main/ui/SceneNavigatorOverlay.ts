@@ -10,12 +10,13 @@ export interface SceneNavigatorRoomEntry {
 
 export interface SceneNavigatorAvatarEntry extends AvatarDirectoryUserSummary {
     statusLabel?: string;
+    badgeLabel?: string;
+    badgeTone?: "online" | "summoned";
 }
 
 interface SceneNavigatorOverlayArgs {
     language: AppLanguage;
     onTeleport: (roomId: string) => void;
-    onRefreshUsers: () => Promise<void> | void;
     onSpawnAvatar: (userId: string) => Promise<void> | void;
 }
 
@@ -32,7 +33,7 @@ export class SceneNavigatorOverlay {
     private busyUserId: string | null = null;
     private activeAvatarLabel: string | null = null;
     private activeTab: SceneNavigatorTabId = "rooms";
-    private collapsed = false;
+    private collapsed = true;
 
     public open(app: ThisIsMyDepartmentApp, args: SceneNavigatorOverlayArgs): void {
         this.app = app;
@@ -171,15 +172,6 @@ export class SceneNavigatorOverlay {
         avatarsSection.hidden = this.activeTab !== "avatars";
 
         const avatarsHeader = this.createSectionHeader(app.t("navigator.avatars.title"), app.t("navigator.avatars.subtitle"));
-        const refreshButton = document.createElement("button");
-        refreshButton.type = "button";
-        refreshButton.className = "timd-scene-navigator__refresh";
-        refreshButton.textContent = this.loadingUsers ? app.t("navigator.avatars.loading") : app.t("navigator.avatars.refresh");
-        refreshButton.disabled = this.loadingUsers || !!this.busyUserId;
-        refreshButton.onclick = () => {
-            void this.args?.onRefreshUsers();
-        };
-        avatarsHeader.appendChild(refreshButton);
         avatarsSection.appendChild(avatarsHeader);
 
         const activeAvatar = document.createElement("div");
@@ -201,7 +193,18 @@ export class SceneNavigatorOverlay {
         } else {
             const avatarList = document.createElement("div");
             avatarList.className = "timd-scene-navigator__list";
+            let previousGroupLabel = "";
             this.avatars.forEach(avatar => {
+                const groupLabel = avatar.badgeTone === "summoned"
+                    ? app.t("navigator.avatars.group.summoned")
+                    : avatar.badgeTone === "online"
+                        ? app.t("navigator.avatars.group.online")
+                        : app.t("navigator.avatars.group.offline");
+                if (groupLabel !== previousGroupLabel) {
+                    avatarList.appendChild(this.createGroupHeading(groupLabel));
+                    previousGroupLabel = groupLabel;
+                }
+
                 const canSpawn = !!avatar.avatar && !avatar.isOnline;
                 const spawnButtonLabel = this.busyUserId === avatar.userId
                     ? app.t("navigator.avatars.spawning")
@@ -215,7 +218,9 @@ export class SceneNavigatorOverlay {
                 const item = this.createListItem({
                     title: avatar.displayName,
                     subtitle: subtitleParts.join(" · ") || undefined,
-                    actionLabel: canSpawn ? spawnButtonLabel : app.t("navigator.avatars.unavailable"),
+                    badgeLabel: avatar.badgeLabel,
+                    badgeTone: avatar.badgeTone,
+                    actionLabel: canSpawn ? spawnButtonLabel : app.t("navigator.avatars.spawn"),
                     actionDisabled: !canSpawn || !!this.busyUserId,
                     onAction: () => {
                         void this.args?.onSpawnAvatar(avatar.userId);
@@ -258,10 +263,6 @@ export class SceneNavigatorOverlay {
             }
             this.activeTab = tabId;
             this.render();
-
-            if (tabId === "avatars") {
-                void this.args?.onRefreshUsers();
-            }
         };
         return button;
     }
@@ -294,9 +295,18 @@ export class SceneNavigatorOverlay {
         return empty;
     }
 
+    private createGroupHeading(label: string): HTMLDivElement {
+        const heading = document.createElement("div");
+        heading.className = "timd-scene-navigator__group-heading";
+        heading.textContent = label;
+        return heading;
+    }
+
     private createListItem(args: {
         title: string;
         subtitle?: string;
+        badgeLabel?: string;
+        badgeTone?: "online" | "summoned";
         actionLabel: string;
         actionDisabled?: boolean;
         onAction: () => void;
@@ -307,11 +317,24 @@ export class SceneNavigatorOverlay {
         const copy = document.createElement("div");
         copy.className = "timd-scene-navigator__item-copy";
 
+        const titleRow = document.createElement("div");
+        titleRow.className = "timd-scene-navigator__item-title-row";
+
         const title = document.createElement("div");
         title.className = "timd-scene-navigator__item-title";
         title.textContent = args.title;
+        titleRow.appendChild(title);
 
-        copy.appendChild(title);
+        if (args.badgeLabel) {
+            const badge = document.createElement("span");
+            badge.className = args.badgeTone
+                ? `timd-scene-navigator__badge timd-scene-navigator__badge--${args.badgeTone}`
+                : "timd-scene-navigator__badge";
+            badge.textContent = args.badgeLabel;
+            titleRow.appendChild(badge);
+        }
+
+        copy.appendChild(titleRow);
         if (args.subtitle) {
             const subtitle = document.createElement("div");
             subtitle.className = "timd-scene-navigator__item-subtitle";

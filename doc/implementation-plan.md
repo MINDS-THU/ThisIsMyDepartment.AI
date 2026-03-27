@@ -25,9 +25,9 @@ It is intentionally repo-specific. The goal is to identify the order of work, th
 
 ## Status Snapshot
 
-- Completed: shared contracts, backend scaffold, authenticated bootstrap, avatar onboarding restore, activity logging, backend agent chat, unified conversation persistence, SQLite persistence, auth integration docs, hosting docs, and integration of the authoritative realtime socket server into the backend package.
-- In progress: release cleanup for open-source publication, remaining legacy naming cleanup, and deployment polish.
-- Still open: broader provider integrations beyond the current mock/OpenAI path, deeper internal rename cleanup, richer conversation-history replay in the frontend, and coordinated modernization of the legacy Socket.IO client/server stack.
+- Completed: shared contracts, backend scaffold, authenticated bootstrap, avatar onboarding restore, activity logging, backend agent chat, unified conversation persistence, SQLite persistence, auth integration docs, hosting docs, integration of the authoritative realtime socket server into the backend package, user-owned character prompt editing, server-backed conversation authorship labeling, scene navigator and avatar-directory UI, and collision-aware AI avatar wandering.
+- In progress: release cleanup for open-source publication, remaining legacy naming cleanup, runtime alignment between the legacy frontend stack and the backend SQLite dependency, and deployment polish.
+- Still open: broader provider integrations beyond the current mock/OpenAI/OpenRouter path, deeper internal rename cleanup, richer conversation-history replay and export in the frontend, broader end-to-end test coverage, and coordinated modernization of the legacy Socket.IO client/server stack.
 
 ## Release Risk Notes
 
@@ -359,7 +359,7 @@ Keep AI-character behavior unified while reserving editable prompt configuration
 - teacher and student AI characters share the same implementation and conversation UI
 - prompt updates are recorded in activity history only for the user's own character prompt
 
-Status: in progress as part of the product cleanup that removes teacher-only prompt editing
+Status: completed for persistence and end-user editing of the user's own offline character prompt; broader UI cleanup is still part of the remaining product polish
 
 ## Phase 8: Deployment And Hosting Cleanup
 
@@ -387,7 +387,7 @@ Make the repo understandable and hostable as an open-source project.
 - a new contributor can understand the architecture without reading the old code first
 - a host can configure login integration and LLM provider settings from documentation
 
-Status: in progress; the main README, auth integration guide, and hosting guide now exist, but deeper release cleanup is still ongoing
+Status: in progress; the main README, current-status doc, auth integration guide, hosting guide, and release checklist now exist, but deeper release cleanup is still ongoing
 
 ## Recommended First Coding Milestone
 

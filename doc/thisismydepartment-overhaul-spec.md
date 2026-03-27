@@ -10,6 +10,8 @@ This spec is the target for the cleanup and overhaul work.
 
 The concrete execution order for this repo is documented in [doc/implementation-plan.md](doc/implementation-plan.md).
 
+Status update: a large part of this target architecture is now live in the repository. This document remains useful as the architectural rationale, but it should be read together with [doc/current-status.md](doc/current-status.md) for the current implementation state.
+
 ## Product Goals
 
 1. Support easy self-hosting by departments, labs, companies, and schools.
@@ -65,6 +67,8 @@ This is required because both of the following need trusted server-side logic:
 
 - upstream identity handoff and session establishment
 - LLM provider access with secrets, rate limiting, and retrieval of stored user context
+
+This architectural split is now implemented in the live repository. The remaining work is mostly release polish, broader provider coverage, runtime cleanup, and documentation hardening.
 
 ## Target Architecture
 
@@ -425,13 +429,11 @@ The activity ingestion API may later be batched, but the first implementation sh
 4. Should multiplayer identity in the scene show `displayName` only, or include role/title metadata?
 5. Which provider set should be supported in the first release: OpenAI only, or also Ollama and Azure OpenAI?
 
-## Immediate Repo Consequences
+## Remaining Repo Consequences
 
-The next implementation stage should not start by patching isolated frontend files. It should start by defining the backend package, API contracts, and frontend bootstrap flow, because the current frontend cannot satisfy the identity and persistence requirements on its own.
+The repo is no longer at the pre-backend stage described by the original overhaul plan. The remaining practical work items are now:
 
-That means the next practical work items are:
-
-1. scaffold a backend service inside this repository
-2. define shared TypeScript types for bootstrap, user, profile, activity, and agent chat
-3. refactor frontend startup to depend on `GET /api/bootstrap`
-4. convert the existing character picker into a first-time profile setup flow
+1. finish release cleanup for naming, docs, templates, and maintainer metadata
+2. align the runtime story between the legacy frontend stack and the backend SQLite dependency
+3. expand provider coverage and deployment validation beyond the currently implemented mock, OpenAI, and OpenRouter paths
+4. deepen test coverage and release automation around bootstrap, profile updates, realtime room sync, and agent chat

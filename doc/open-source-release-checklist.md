@@ -6,15 +6,18 @@ This checklist captures the remaining work between the current overhaul state an
 
 - frontend TypeScript compilation passes
 - backend TypeScript build passes
-- backend startup was validated on Node `16.20.2`
+- backend startup has been validated after rebuilding `better-sqlite3` for the active runtime
 - default backend health endpoint responds on `http://127.0.0.1:8787/health`
 - backend production dependency audit is clean
 - copyable runtime configuration templates exist for frontend local runtime and backend local or production deployment
+- backend-managed auth, profile persistence, activity logging, conversation storage, and integrated agent chat are all present in the main repository
+- in-world navigator, avatar summoning flow, and authoritative room-sync presence are implemented in the current app
 
 ## Release blockers
 
 - decide and publish the canonical repository URL and maintainer/contact information
 - confirm the production auth integration guidance against a real upstream deployment
+- resolve or explicitly document the split runtime expectations between the legacy frontend toolchain and the backend SQLite dependency
 - resolve or explicitly accept the remaining root production dependency findings in the legacy `socket.io-client` stack
 - validate and document the integrated backend realtime room server deployment path used by browser clients
 
@@ -22,7 +25,8 @@ This checklist captures the remaining work between the current overhaul state an
 
 - review the root production audit findings affecting `socket.io-client`, `engine.io-client`, `socket.io-parser`, `ws`, and `parseuri`
 - upgrade client and server together and validate protocol compatibility before changing the Socket.IO major version
-- keep Node `16.20.2` as the validated legacy frontend toolchain until the webpack/electron stack is intentionally modernized
+- either keep the current split-runtime story clearly documented or deliberately converge the frontend and backend on a cleaner shared Node baseline
+- document when `npm --prefix server rebuild better-sqlite3` is required after switching runtimes in local development or CI
 
 ## Documentation follow-up
 
@@ -43,6 +47,7 @@ This checklist captures the remaining work between the current overhaul state an
 - document minimum secret management expectations for auth handoff and LLM provider keys
 - verify reverse-proxy header trust boundaries in a real deployment
 - confirm `postMessage` origin allowlists for embedded login flows
+- validate OpenRouter and OpenAI deployment guidance under the same release process used for auth and realtime checks
 
 ## Nice-to-have before first tag
 

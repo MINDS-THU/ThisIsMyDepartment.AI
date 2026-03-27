@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import { handleOptions, sendJson } from "./http/response";
 import { getServerConfig } from "./config";
 import { handleCreateActivityRoute, handleListActivitiesRoute } from "./routes/activity";
+import { handleCreateAdminEnvironmentAvatarRoute, handleListAdminEnvironmentAvatarsRoute, handleUpdateAdminEnvironmentAvatarRoute } from "./routes/adminEnvironmentAvatar";
 import { handleChatWithAgentRoute, handleListAgentsRoute, handleListUsersRoute, handleSpawnAvatarAgentRoute } from "./routes/agent";
 import { handleAuthStatusRoute, handleHandoffRoute, handleLoginPageRoute, handleLogoutRoute, handlePostMessageBridgeRoute, handleProxyLoginRoute } from "./routes/auth";
 import { handleBootstrapRoute } from "./routes/bootstrap";
@@ -57,6 +58,22 @@ const handleRequest = (request: IncomingMessage, response: ServerResponse): void
 
     if (method === "GET" && requestUrl.pathname === "/api/agents") {
         handleListAgentsRoute(request, response);
+        return;
+    }
+
+    if (method === "GET" && requestUrl.pathname === "/api/admin/environment-avatars") {
+        handleListAdminEnvironmentAvatarsRoute(request, response);
+        return;
+    }
+
+    if (method === "POST" && requestUrl.pathname === "/api/admin/environment-avatars") {
+        void handleCreateAdminEnvironmentAvatarRoute(request, response);
+        return;
+    }
+
+    const adminEnvironmentAvatarMatch = requestUrl.pathname.match(/^\/api\/admin\/environment-avatars\/([^/]+)$/);
+    if (method === "PUT" && adminEnvironmentAvatarMatch) {
+        void handleUpdateAdminEnvironmentAvatarRoute(request, response, decodeURIComponent(adminEnvironmentAvatarMatch[1]));
         return;
     }
 

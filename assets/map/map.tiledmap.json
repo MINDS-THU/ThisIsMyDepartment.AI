@@ -701,7 +701,6 @@
         {
          "draworder":"topdown",
          "id":9,
-         "locked":true,
          "name":"collisions",
          "objects":[
                 {
@@ -2200,7 +2199,7 @@
                  "y":543.785621835868
                 }, 
                 {
-                 "height":176.405081984154,
+                 "height":170.663894706625,
                  "id":665,
                  "name":"collision",
                  "opacity":1,
@@ -2218,7 +2217,7 @@
                  "y":657.864745722815
                 }, 
                 {
-                 "height":176.405,
+                 "height":172.960287633483,
                  "id":666,
                  "name":"collision",
                  "opacity":1,
@@ -2249,7 +2248,7 @@
                  "rotation":0,
                  "type":"collision",
                  "visible":true,
-                 "width":64.7101229532668,
+                 "width":51.5053922149502,
                  "x":1053.3034527041,
                  "y":799.385053105982
                 }, 
@@ -2267,27 +2266,9 @@
                  "rotation":0,
                  "type":"collision",
                  "visible":true,
-                 "width":64.7101,
-                 "x":931.016175169365,
+                 "width":52.6536067171892,
+                 "x":943.072668452176,
                  "y":799.672105953611
-                }, 
-                {
-                 "height":24.8376689057297,
-                 "id":669,
-                 "name":"collision",
-                 "opacity":1,
-                 "properties":[
-                        {
-                         "name":"showBounds",
-                         "type":"bool",
-                         "value":false
-                        }],
-                 "rotation":0,
-                 "type":"collision",
-                 "visible":true,
-                 "width":49.2088943506717,
-                 "x":935.609124991388,
-                 "y":835.841585802044
                 }, 
                 {
                  "height":17.9482752669653,
@@ -2309,7 +2290,7 @@
                 }],
          "opacity":1,
          "type":"objectgroup",
-         "visible":false,
+         "visible":true,
          "x":0,
          "y":0
         }, 

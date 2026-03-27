@@ -218,7 +218,7 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
         }
 
         if (this.nameLabel) {
-            const offset = this.height + 8;
+            const offset = this.height + 4;
             this.nameLabel.moveTo(0, -offset);
         }
 
@@ -312,7 +312,8 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
                 font: ThisIsMyDepartmentApp.smallFont,
                 color: "#ffffff",
                 outlineColor: "#000000",
-                fallbackFont: "14px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif",
+                fallbackFont: "12px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif",
+                fallbackLineHeight: 12,
                 layer: Layer.OVERLAY
             });
             this.appendChild(this.nameLabel);
@@ -327,6 +328,10 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
         const w = bounds.width, h = bounds.height;
         const px = bounds.minX + x - this.getX(), py = bounds.minY + y - this.getY();
         return colliders.some(c => c.collidesWithRectangle(px, py, w, h));
+    }
+
+    public hasSceneCollisionAt(x = this.getX(), y = this.getY()): boolean {
+        return this.hasLevelCollisionAt(x, y);
     }
 
     @cacheResult

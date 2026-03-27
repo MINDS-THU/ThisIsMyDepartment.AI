@@ -37,7 +37,7 @@
     "compile": "tsc",
     "watch": "tsc -w",
     "prepare": "npm run -s clean && npm run -s compile",
-    "dist": "webpack",
+    "dist": "node --openssl-legacy-provider ./node_modules/webpack/bin/webpack.js",
     "start": "webpack-dev-server -d",
     "package": "electron-forge package",
     "make": "electron-forge make"

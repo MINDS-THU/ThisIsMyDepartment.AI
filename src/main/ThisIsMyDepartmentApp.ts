@@ -9,6 +9,9 @@ import { Game } from "../engine/Game";
 import { OnlineService } from "../engine/online/OnlineService";
 import { Camera } from "../engine/scene/Camera";
 import { FadeToBlack } from "../engine/scene/camera/FadeToBlack";
+import { Animator } from "../engine/scene/animations/Animator";
+import { ScenePointerDownEvent } from "../engine/scene/events/ScenePointerDownEvent";
+import { SimpleDirection } from "../engine/geom/Direction";
 import { Direction } from "../engine/geom/Direction";
 import { ControllerFamily } from "../engine/input/ControllerFamily";
 import { clamp } from "../engine/util/math";
@@ -33,7 +36,9 @@ import { PresentationNode } from "./nodes/PresentationNode";
 import { SwitchNode } from "./nodes/SwitchNode";
 import { TextInputNode } from "./nodes/TextInputNode";
 import { LLMAgentNode } from "./nodes/LLMAgentNode";
+import { EnvironmentPlacementPreviewNode } from "./nodes/EnvironmentPlacementPreviewNode";
 import { LLMAgentService } from "./services/LLMAgentService";
+import { ParticleNode, valueCurves } from "./nodes/ParticleNode";
 import agentDefinitions from "./agents/index";
 import { logActivity } from "./services/activity";
 import { configureBackendLLMBridge } from "./services/backendLLMBridge";
@@ -41,6 +46,7 @@ import { loadBootstrapState } from "./services/bootstrap";
 import { appendConversationMessage, fetchConversation } from "./services/conversations";
 import { saveAvatarProfile, saveCharacterSystemPrompt, saveProfilePreferences } from "./services/profile";
 import { shouldEnableJitsi } from "./runtimeConfig";
+import { createEditableEnvironmentAvatar, EditableEnvironmentAvatar, fetchEditableEnvironmentAvatars, saveEditableEnvironmentAvatar } from "./services/environmentAvatarAdmin";
 import { ConversationEntry, ConversationWindow, ConversationWindowDisplayOptions } from "./ui/ConversationWindow";
 import { CharacterStatusOverlay } from "./ui/CharacterStatusOverlay";
 import { PresentationSessionOverlay } from "./ui/PresentationSessionOverlay";
@@ -52,7 +58,7 @@ import { LoadingScene } from "./scenes/LoadingScene";
 import type { LLMAgentDefinition } from "./agents/AgentDefinition";
 import type { ActivityLogType } from "./services/activity";
 import type { BootstrapState, CurrentUser, CurrentUserProfile } from "./types/currentUser";
-import type { DirectMessageEvent, PlayerConversationEvent, RoomInfoEvent } from "../engine/online/OnlineService";
+import type { DirectMessageEvent, EnvironmentAvatarUpsertEvent, PlayerConversationEvent, RoomInfoEvent } from "../engine/online/OnlineService";
 import { AppLanguage, applyLanguageToDocument, DEFAULT_LANGUAGE, getLanguagePreference, normalizeLanguage, storeLanguagePreference, translate } from "./i18n";
 import { MediaType } from "../typings/Jitsi/service/RTC/MediaType";
 import { AvatarDirectoryUserSummary, fetchAvatarDirectoryUsers, spawnAvatarAgent } from "./services/avatarDirectory";
@@ -83,9 +89,43 @@ interface RemotePresentationSession {
 }
 
 type SpawnedAvatarPresence = NonNullable<RoomInfoEvent["spawnedAvatars"]>[number];
+type EnvironmentAvatarPlacementMode = "position" | "walk-area";
+
+interface EnvironmentAvatarPlacementResult {
+    position?: { x: number; y: number };
+    walkArea?: { x: number; y: number; width: number; height: number };
+}
+
+interface EnvironmentAvatarPlacementSession {
+    avatar: EditableEnvironmentAvatar;
+    mode: EnvironmentAvatarPlacementMode;
+    previewNode: EnvironmentPlacementPreviewNode;
+    dragAnchor?: { x: number; y: number };
+    resolve: (result: EnvironmentAvatarPlacementResult | null) => void;
+}
 
 const RIGHT_ELEVATOR_SPAWN_POINT = { x: 1488, y: 704 };
 const SPAWNED_AVATAR_WANDER_SIZE = 120;
+const SPAWNED_AVATAR_DESPAWN_DURATION_MS = 280;
+const SPAWNED_AVATAR_DESPAWN_PARTICLE_COUNT = 28;
+const SPAWNED_AVATAR_SUMMON_OFFSETS = [
+    { x: 28, y: 0 },
+    { x: -28, y: 0 },
+    { x: 0, y: 28 },
+    { x: 0, y: -28 },
+    { x: 44, y: 0 },
+    { x: -44, y: 0 },
+    { x: 0, y: 44 },
+    { x: 0, y: -44 },
+    { x: 22, y: 22 },
+    { x: -22, y: 22 },
+    { x: 22, y: -22 },
+    { x: -22, y: -22 },
+    { x: 56, y: 24 },
+    { x: -56, y: 24 },
+    { x: 56, y: -24 },
+    { x: -56, y: -24 }
+];
 
 export interface PresentationAudienceMember {
     id: string;
@@ -161,11 +201,17 @@ export class ThisIsMyDepartmentApp extends Game {
     private sceneRoomEntries: Array<SceneNavigatorRoomEntry & { x: number; y: number }> = [];
     private readonly spawnedAvatarPresences = new Map<string, SpawnedAvatarPresence>();
     private readonly spawnedAvatarNodes = new Map<string, LLMAgentNode>();
+    private readonly despawningSpawnedAvatarOwners = new Set<string>();
+    private readonly pendingSpawnedAvatarReplacements = new Map<string, SpawnedAvatarPresence>();
     private avatarDirectoryUsers: AvatarDirectoryUserSummary[] = [];
     private avatarDirectoryLoadPromise: Promise<void> | null = null;
     private avatarDirectoryRequestVersion = 0;
     private avatarDirectoryError: string | null = null;
     private avatarDirectoryBusyUserId: string | null = null;
+    private avatarDirectoryRefreshTimeoutId: number | null = null;
+    private avatarDirectoryRefreshForcePending = false;
+    private environmentAvatarPlacementSession: EnvironmentAvatarPlacementSession | null = null;
+    private readonly environmentAvatarUpdatedAt = new Map<string, string>();
     private readonly llmService = LLMAgentService.instance;
     private activeLLMConversation: { agent: LLMAgentNode; playerId: string; pending: boolean } | null = null;
     private activePlayerConversation: { partnerId: string; partnerName: string } | null = null;
@@ -230,6 +276,9 @@ export class ThisIsMyDepartmentApp extends Game {
         });
         this.onlineService.onRoomInfoUpdate.connect(event => {
             this.handleRoomInfoUpdate(event);
+        });
+        this.onlineService.onEnvironmentAvatarUpsert.connect(event => {
+            this.handleEnvironmentAvatarUpsert(event);
         });
     }
     private _onlineService!: OnlineService;
@@ -497,7 +546,7 @@ export class ThisIsMyDepartmentApp extends Game {
         return mediaControls.isLocalVideoEnabled();
     }
 
-    public openSettingsOverlay(initialTab: "media" | "language" | "character" | "ai-prompt" = "media"): void {
+    public openSettingsOverlay(initialTab: "media" | "language" | "character" | "ai-prompt" | "environment-avatars" = "media"): void {
         if (!this.settingsOverlay) {
             this.settingsOverlay = new SettingsOverlay();
         }
@@ -509,6 +558,7 @@ export class ThisIsMyDepartmentApp extends Game {
             initialPrompt: this.currentUserProfile?.characterSystemPrompt ?? "",
             initialAudioEnabled: this.isLocalAudioEnabled(),
             initialVideoEnabled: this.isLocalVideoEnabled(),
+            canManageEnvironmentAvatars: this.isCurrentUserAdmin(),
             getMediaDevices: async () => {
                 const enumeratedDevices = await this.enumerateMediaDevices();
                 return enumeratedDevices.map((device, index) => ({
@@ -525,6 +575,21 @@ export class ThisIsMyDepartmentApp extends Game {
             },
             onLanguageSave: async (language: AppLanguage) => {
                 await this.saveLanguagePreference(language);
+            },
+            loadEnvironmentAvatars: async () => {
+                return this.loadEditableEnvironmentAvatars();
+            },
+            onEnvironmentAvatarCreate: async seed => {
+                return this.createEnvironmentAvatarConfiguration(seed);
+            },
+            onEnvironmentAvatarSave: async avatar => {
+                return this.saveEnvironmentAvatarConfiguration(avatar);
+            },
+            onEnvironmentAvatarPlacementStart: async (avatar, mode) => {
+                return this.beginEnvironmentAvatarPlacement(avatar, mode);
+            },
+            onEnvironmentAvatarPlacementCancel: () => {
+                this.cancelEnvironmentAvatarPlacement();
             },
             onMediaToggle: async (kind, enabled) => {
                 if (kind === "audioinput") {
@@ -653,6 +718,348 @@ export class ThisIsMyDepartmentApp extends Game {
         }
 
         this.applyLanguage(nextLanguage);
+    }
+
+    private isCurrentUserAdmin(): boolean {
+        return this.currentUser?.roles.some(role => role.trim().toLowerCase() === "admin") ?? false;
+    }
+
+    private async loadEditableEnvironmentAvatars(): Promise<EditableEnvironmentAvatar[]> {
+        const avatars = await fetchEditableEnvironmentAvatars();
+        return avatars.slice().sort((left, right) => left.displayName.localeCompare(right.displayName));
+    }
+
+    private async createEnvironmentAvatarConfiguration(seed?: Partial<EditableEnvironmentAvatar>): Promise<EditableEnvironmentAvatar> {
+        const defaultPosition = this.isInGameScene()
+            ? {
+                x: this.roundSceneCoordinate(this.getPlayer().getX()),
+                y: this.roundSceneCoordinate(this.getPlayer().getY())
+            }
+            : { x: 128, y: 1088 };
+        const position = seed?.position ? { ...seed.position } : defaultPosition;
+        const walkArea = seed?.walkArea
+            ? { ...seed.walkArea }
+            : { x: position.x, y: position.y, width: 80, height: 80 };
+        const createdAvatar = await createEditableEnvironmentAvatar({
+            displayName: seed?.displayName?.trim() || "New environment avatar",
+            spriteIndex: seed?.spriteIndex ?? 0,
+            caption: seed?.caption ?? "Press E to chat",
+            defaultSystemPrompt: seed?.defaultSystemPrompt ?? "",
+            position,
+            walkArea,
+            spawnByDefault: seed?.spawnByDefault ?? true,
+            characterRole: seed?.characterRole ?? "custom"
+        });
+
+        if (!createdAvatar) {
+            throw new Error("Environment avatar creation failed.");
+        }
+
+        this.upsertEnvironmentAvatarDefinition(createdAvatar);
+        this.refreshEnvironmentAvatarInScene(createdAvatar);
+        this.showNotification(`${createdAvatar.displayName} created.`);
+        return createdAvatar;
+    }
+
+    private async saveEnvironmentAvatarConfiguration(avatar: EditableEnvironmentAvatar): Promise<EditableEnvironmentAvatar> {
+        const savedAvatar = await saveEditableEnvironmentAvatar(avatar);
+        if (!savedAvatar) {
+            throw new Error("Environment avatar update failed.");
+        }
+
+        this.upsertEnvironmentAvatarDefinition(savedAvatar);
+        this.refreshEnvironmentAvatarInScene(savedAvatar);
+        this.showNotification(`${savedAvatar.displayName} updated.`);
+        return savedAvatar;
+    }
+
+    private async beginEnvironmentAvatarPlacement(
+        avatar: EditableEnvironmentAvatar,
+        mode: EnvironmentAvatarPlacementMode
+    ): Promise<EnvironmentAvatarPlacementResult | null> {
+        if (!this.isInGameScene()) {
+            throw new Error("Environment avatar placement is only available inside the scene.");
+        }
+
+        this.cancelEnvironmentAvatarPlacement();
+
+        return new Promise<EnvironmentAvatarPlacementResult | null>(resolve => {
+            const previewNode = new EnvironmentPlacementPreviewNode({
+                spriteIndex: avatar.spriteIndex,
+                displayName: avatar.displayName,
+                position: { ...avatar.position },
+                walkArea: avatar.walkArea ? { ...avatar.walkArea } : undefined,
+                mode
+            });
+            previewNode.appendTo(this.getGameScene().rootNode);
+
+            this.environmentAvatarPlacementSession = {
+                avatar: {
+                    ...avatar,
+                    position: { ...avatar.position },
+                    walkArea: avatar.walkArea ? { ...avatar.walkArea } : undefined
+                },
+                mode,
+                previewNode,
+                resolve
+            };
+
+            this.getGameScene().onPointerDown.connect(this.handleEnvironmentAvatarPlacementPointerDown, this);
+            this.getGameScene().onPointerMove.connect(this.handleEnvironmentAvatarPlacementPointerMove, this);
+            this.preventPlayerInteraction += 1;
+            this.canvas.style.cursor = mode === "position" ? "grabbing" : "crosshair";
+        });
+    }
+
+    private cancelEnvironmentAvatarPlacement(): void {
+        this.finishEnvironmentAvatarPlacement(null);
+    }
+
+    private handleEnvironmentAvatarPlacementPointerDown(event: ScenePointerDownEvent<ThisIsMyDepartmentApp>): void {
+        const session = this.environmentAvatarPlacementSession;
+        if (!session || event.getButton() !== 0) {
+            return;
+        }
+
+        if (session.mode === "position") {
+            this.updateEnvironmentPlacementPreviewPosition(event.getX(), event.getY());
+            event.onPointerEnd.connect(endEvent => {
+                const position = {
+                    x: this.roundSceneCoordinate(endEvent.getX()),
+                    y: this.roundSceneCoordinate(endEvent.getY())
+                };
+                session.previewNode.setAvatarPosition(position);
+                this.finishEnvironmentAvatarPlacement({ position });
+            });
+            return;
+        }
+
+        const anchor = {
+            x: event.getX(),
+            y: event.getY()
+        };
+        session.dragAnchor = anchor;
+        this.updateEnvironmentPlacementPreviewWalkArea(anchor.x, anchor.y);
+        event.onPointerEnd.connect(endEvent => {
+            const walkArea = this.normalizeEnvironmentWalkArea(anchor, {
+                x: endEvent.getX(),
+                y: endEvent.getY()
+            });
+            session.previewNode.setPendingWalkArea(walkArea);
+            session.dragAnchor = undefined;
+            this.finishEnvironmentAvatarPlacement({ walkArea });
+        });
+    }
+
+    private handleEnvironmentAvatarPlacementPointerMove(event: { getX(): number; getY(): number }): void {
+        const session = this.environmentAvatarPlacementSession;
+        if (!session) {
+            return;
+        }
+
+        if (session.mode === "position") {
+            this.updateEnvironmentPlacementPreviewPosition(event.getX(), event.getY());
+            return;
+        }
+
+        this.updateEnvironmentPlacementPreviewWalkArea(event.getX(), event.getY());
+    }
+
+    private updateEnvironmentPlacementPreviewPosition(x: number, y: number): void {
+        const session = this.environmentAvatarPlacementSession;
+        if (!session) {
+            return;
+        }
+
+        session.previewNode.setAvatarPosition({
+            x: this.roundSceneCoordinate(x),
+            y: this.roundSceneCoordinate(y)
+        });
+    }
+
+    private updateEnvironmentPlacementPreviewWalkArea(x: number, y: number): void {
+        const session = this.environmentAvatarPlacementSession;
+        if (!session) {
+            return;
+        }
+
+        if (session.dragAnchor) {
+            session.previewNode.setPendingWalkArea(this.normalizeEnvironmentWalkArea(session.dragAnchor, { x, y }));
+            return;
+        }
+
+        session.previewNode.setPendingWalkArea(undefined);
+    }
+
+    private finishEnvironmentAvatarPlacement(result: EnvironmentAvatarPlacementResult | null): void {
+        const session = this.environmentAvatarPlacementSession;
+        if (!session || !this.isInGameScene()) {
+            return;
+        }
+
+        this.getGameScene().onPointerDown.disconnect(this.handleEnvironmentAvatarPlacementPointerDown, this);
+        this.getGameScene().onPointerMove.disconnect(this.handleEnvironmentAvatarPlacementPointerMove, this);
+        session.previewNode.remove();
+        this.environmentAvatarPlacementSession = null;
+        this.preventPlayerInteraction = clamp(this.preventPlayerInteraction - 1, 0, Infinity);
+        this.canvas.style.cursor = "";
+        session.resolve(result);
+    }
+
+    private normalizeEnvironmentWalkArea(
+        start: { x: number; y: number },
+        end: { x: number; y: number }
+    ): { x: number; y: number; width: number; height: number } {
+        let minX = Math.min(start.x, end.x);
+        let minY = Math.min(start.y, end.y);
+        let width = Math.abs(end.x - start.x);
+        let height = Math.abs(end.y - start.y);
+
+        if (width < 24) {
+            if (end.x < start.x) {
+                minX = start.x - 24;
+            }
+            width = 24;
+        }
+        if (height < 24) {
+            if (end.y < start.y) {
+                minY = start.y - 24;
+            }
+            height = 24;
+        }
+
+        return {
+            x: this.roundSceneCoordinate(minX),
+            y: this.roundSceneCoordinate(minY),
+            width: this.roundSceneCoordinate(width),
+            height: this.roundSceneCoordinate(height)
+        };
+    }
+
+    private roundSceneCoordinate(value: number): number {
+        return Math.round(value * 100) / 100;
+    }
+
+    private upsertEnvironmentAvatarDefinition(avatar: EditableEnvironmentAvatar): void {
+        if (avatar.updatedAt) {
+            this.environmentAvatarUpdatedAt.set(avatar.agentId, avatar.updatedAt);
+        }
+        const nextDefinition: LLMAgentDefinition = {
+            id: `agent-${avatar.agentId}`,
+            agentId: avatar.agentId,
+            displayName: avatar.displayName,
+            spriteIndex: avatar.spriteIndex,
+            position: { ...avatar.position },
+            caption: avatar.caption,
+            systemPrompt: avatar.defaultSystemPrompt,
+            provider: avatar.provider,
+            model: avatar.model,
+            walkArea: avatar.walkArea ? { ...avatar.walkArea } : undefined,
+            spawnByDefault: avatar.spawnByDefault
+        };
+
+        const definitionIndex = this.agentDefinitions.findIndex(definition => definition.agentId === avatar.agentId);
+        if (definitionIndex >= 0) {
+            this.agentDefinitions.splice(definitionIndex, 1, nextDefinition);
+            return;
+        }
+
+        this.agentDefinitions.push(nextDefinition);
+    }
+
+    private handleEnvironmentAvatarUpsert(avatar: EnvironmentAvatarUpsertEvent): void {
+        if (!avatar.agentId || avatar.ownerUserId) {
+            return;
+        }
+
+        const knownUpdatedAt = this.environmentAvatarUpdatedAt.get(avatar.agentId);
+        if (knownUpdatedAt && avatar.updatedAt && knownUpdatedAt === avatar.updatedAt) {
+            return;
+        }
+
+        const syncedAvatar: EditableEnvironmentAvatar = {
+            agentId: avatar.agentId,
+            displayName: avatar.displayName,
+            spriteIndex: avatar.spriteIndex,
+            caption: avatar.caption,
+            defaultSystemPrompt: avatar.defaultSystemPrompt,
+            position: { ...avatar.position },
+            walkArea: avatar.walkArea ? { ...avatar.walkArea } : undefined,
+            characterRole: avatar.characterRole,
+            spawnByDefault: avatar.spawnByDefault,
+            provider: avatar.provider,
+            model: avatar.model,
+            updatedAt: avatar.updatedAt
+        };
+
+        this.upsertEnvironmentAvatarDefinition(syncedAvatar);
+        this.refreshEnvironmentAvatarInScene(syncedAvatar);
+    }
+
+    private refreshEnvironmentAvatarInScene(avatar: EditableEnvironmentAvatar): void {
+        if (!this.isInGameScene()) {
+            return;
+        }
+
+        const sceneRoot = this.getGameScene().rootNode;
+        const existingNode = sceneRoot.getDescendantsByType<LLMAgentNode>(LLMAgentNode)
+            .find(node => node.getAgentId() === avatar.agentId);
+
+        const spawnReplacement = () => {
+            if (avatar.spawnByDefault === false) {
+                return;
+            }
+
+            const agentNode = this.createEnvironmentAvatarSceneNode(avatar);
+            agentNode.moveTo(avatar.position.x, avatar.position.y).appendTo(sceneRoot);
+            this.animateEnvironmentAvatarSpawn(agentNode);
+        };
+
+        if (existingNode) {
+            if (this.activeLLMConversation?.agent === existingNode) {
+                this.closeLLMConversation(existingNode);
+            }
+            this.animateEnvironmentAvatarDespawn(existingNode, spawnReplacement);
+            return;
+        }
+
+        spawnReplacement();
+    }
+
+    private createEnvironmentAvatarSceneNode(avatar: EditableEnvironmentAvatar): LLMAgentNode {
+        return new LLMAgentNode({
+            id: `agent-${avatar.agentId}`,
+            agentId: avatar.agentId,
+            spriteIndex: avatar.spriteIndex,
+            displayName: avatar.displayName,
+            caption: avatar.caption,
+            systemPrompt: avatar.defaultSystemPrompt,
+            walkArea: avatar.walkArea
+        });
+    }
+
+    private animateEnvironmentAvatarSpawn(node: LLMAgentNode): void {
+        this.emitSpawnedAvatarDespawnParticles(node);
+        node.setOpacity(0);
+        node.addAnimation(new Animator((target, value) => {
+            target.setOpacity(value);
+        }, { duration: SPAWNED_AVATAR_DESPAWN_DURATION_MS / 1000 }));
+    }
+
+    private animateEnvironmentAvatarDespawn(node: LLMAgentNode, onComplete?: () => void): void {
+        node.setNavigation({});
+        node.setDirection(SimpleDirection.NONE);
+        this.emitSpawnedAvatarDespawnParticles(node);
+
+        const startOpacity = node.getOpacity();
+        node.addAnimation(new Animator((target, value) => {
+            target.setOpacity(startOpacity * (1 - value));
+        }, { duration: SPAWNED_AVATAR_DESPAWN_DURATION_MS / 1000 }));
+
+        window.setTimeout(() => {
+            node.remove();
+            onComplete?.();
+        }, SPAWNED_AVATAR_DESPAWN_DURATION_MS + 40);
     }
 
     private async enumerateMediaDevices(): Promise<MediaDeviceInfo[]> {
@@ -1855,9 +2262,6 @@ export class ThisIsMyDepartmentApp extends Game {
             onTeleport: roomId => {
                 this.teleportToRoom(roomId);
             },
-            onRefreshUsers: async () => {
-                await this.refreshAvatarDirectory(true);
-            },
             onSpawnAvatar: async userId => {
                 await this.spawnAvatarFromDirectory(userId);
             }
@@ -2401,7 +2805,14 @@ export class ThisIsMyDepartmentApp extends Game {
     }
 
     private handleRoomInfoUpdate(event: RoomInfoEvent): void {
-        const presences = event.spawnedAvatars ?? [];
+        (event.environmentAvatars ?? []).forEach(avatar => {
+            this.handleEnvironmentAvatarUpsert(avatar);
+        });
+
+        const connectedUserIds = new Set((event.userIds ?? []).map(userId => userId.trim()).filter(Boolean));
+        connectedUserIds.add(this.getCurrentUserId());
+
+        const presences = (event.spawnedAvatars ?? []).filter(presence => !connectedUserIds.has(presence.targetUserId));
         this.spawnedAvatarPresences.clear();
         presences.forEach(presence => {
             this.spawnedAvatarPresences.set(presence.ownerUserId, presence);
@@ -2411,6 +2822,21 @@ export class ThisIsMyDepartmentApp extends Game {
             this.syncSpawnedAvatarRoster(presences);
         }
         this.refreshSceneNavigatorOverlay();
+        this.scheduleAvatarDirectoryRefresh(true);
+    }
+
+    private scheduleAvatarDirectoryRefresh(force = false, delayMs = 200): void {
+        this.avatarDirectoryRefreshForcePending = this.avatarDirectoryRefreshForcePending || force;
+        if (this.avatarDirectoryRefreshTimeoutId != null) {
+            window.clearTimeout(this.avatarDirectoryRefreshTimeoutId);
+        }
+
+        this.avatarDirectoryRefreshTimeoutId = window.setTimeout(() => {
+            const shouldForce = this.avatarDirectoryRefreshForcePending;
+            this.avatarDirectoryRefreshTimeoutId = null;
+            this.avatarDirectoryRefreshForcePending = false;
+            void this.refreshAvatarDirectory(shouldForce);
+        }, delayMs);
     }
 
     private rebuildSceneRoomDirectory(): void {
@@ -2467,19 +2893,46 @@ export class ThisIsMyDepartmentApp extends Game {
 
         const selfUserId = this.getCurrentUserId();
         const activePresence = this.spawnedAvatarPresences.get(selfUserId);
+        const summonedTargetIds = new Set(Array.from(this.spawnedAvatarPresences.values()).map(presence => presence.targetUserId));
         this.sceneNavigatorOverlay?.setActiveAvatarLabel(activePresence?.displayName ?? null);
         this.sceneNavigatorOverlay?.setAvatars(this.avatarDirectoryUsers
-            .filter(user => user.userId !== selfUserId)
+            .filter(user => user.userId !== selfUserId && !!user.avatar)
             .map(user => ({
                 ...user,
-                statusLabel: user.isOnline
+                badgeLabel: user.isOnline
                     ? this.t("navigator.avatars.statusOnline")
-                    : Array.from(this.spawnedAvatarPresences.values()).some(presence => presence.targetUserId === user.userId)
-                    ? this.t("navigator.avatars.statusActive")
+                    : summonedTargetIds.has(user.userId)
+                        ? this.t("navigator.avatars.statusActive")
+                    : undefined,
+                badgeTone: user.isOnline
+                    ? "online" as const
+                    : summonedTargetIds.has(user.userId)
+                        ? "summoned" as const
+                        : undefined,
+                statusLabel: user.isOnline
+                    ? undefined
                     : user.hasCharacterSystemPrompt
                         ? this.t("navigator.avatars.statusPromptConfigured")
                         : undefined
-            })));
+            }))
+            .sort((left, right) => {
+                const leftRank = summonedTargetIds.has(left.userId)
+                    ? 0
+                    : left.isOnline
+                        ? 1
+                        : 2;
+                const rightRank = summonedTargetIds.has(right.userId)
+                    ? 0
+                    : right.isOnline
+                        ? 1
+                        : 2;
+
+                if (leftRank !== rightRank) {
+                    return leftRank - rightRank;
+                }
+
+                return left.displayName.localeCompare(right.displayName);
+            }));
     }
 
     private async refreshAvatarDirectory(force = false): Promise<void> {
@@ -2517,7 +2970,7 @@ export class ThisIsMyDepartmentApp extends Game {
         return { ...RIGHT_ELEVATOR_SPAWN_POINT };
     }
 
-    private getSpawnedAvatarSummonPosition(ownerUserId: string, agentId: string): { x: number; y: number } {
+    private getSummonPositionCandidates(base: { x: number; y: number }, ownerUserId: string, agentId: string): Array<{ x: number; y: number }> {
         const offsetSeed = `${ownerUserId}:${agentId}`;
         let hash = 0;
         for (let index = 0; index < offsetSeed.length; index += 1) {
@@ -2525,28 +2978,51 @@ export class ThisIsMyDepartmentApp extends Game {
             hash |= 0;
         }
 
-        const offsetOptions = [
-            { x: 28, y: 0 },
-            { x: -28, y: 0 },
-            { x: 0, y: 28 },
-            { x: 0, y: -28 },
-            { x: 22, y: 22 },
-            { x: -22, y: 22 }
-        ];
-        const offset = offsetOptions[Math.abs(hash) % offsetOptions.length];
+        const startIndex = Math.abs(hash) % SPAWNED_AVATAR_SUMMON_OFFSETS.length;
+        const orderedOffsets = SPAWNED_AVATAR_SUMMON_OFFSETS.map((_, index) => {
+            return SPAWNED_AVATAR_SUMMON_OFFSETS[(startIndex + index) % SPAWNED_AVATAR_SUMMON_OFFSETS.length];
+        });
 
+        return [
+            base,
+            ...orderedOffsets.map(offset => ({ x: base.x + offset.x, y: base.y + offset.y }))
+        ];
+    }
+
+    private pickNavigableSummonPosition(candidates: Array<{ x: number; y: number }>): { x: number; y: number } | null {
+        const probeNode = this.getPlayer();
+        for (const candidate of candidates) {
+            if (!probeNode.hasSceneCollisionAt(candidate.x, candidate.y)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private getSpawnedAvatarSummonPosition(ownerUserId: string, agentId: string): { x: number; y: number } {
+        let basePosition: { x: number; y: number } | null = null;
         if (ownerUserId === this.getCurrentUserId()) {
             const position = this.getPlayer().getScenePosition();
-            return { x: position.x + offset.x, y: position.y + offset.y };
+            basePosition = { x: position.x, y: position.y };
         }
 
-        const ownerNode = this.getOtherPlayerById(ownerUserId);
-        if (ownerNode) {
+        if (!basePosition) {
+            const ownerNode = this.getOtherPlayerById(ownerUserId);
+            if (ownerNode) {
             const position = ownerNode.getScenePosition();
-            return { x: position.x + offset.x, y: position.y + offset.y };
+                basePosition = { x: position.x, y: position.y };
+            }
         }
 
-        return { ...RIGHT_ELEVATOR_SPAWN_POINT };
+        if (basePosition) {
+            const candidate = this.pickNavigableSummonPosition(this.getSummonPositionCandidates(basePosition, ownerUserId, agentId));
+            if (candidate) {
+                return candidate;
+            }
+        }
+
+        const fallbackCandidate = this.pickNavigableSummonPosition(this.getSummonPositionCandidates(RIGHT_ELEVATOR_SPAWN_POINT, ownerUserId, agentId));
+        return fallbackCandidate ?? { ...RIGHT_ELEVATOR_SPAWN_POINT };
     }
 
     private buildSpawnedAvatarWanderArea(center: { x: number; y: number }): { x: number; y: number; width: number; height: number } {
@@ -2606,6 +3082,7 @@ export class ThisIsMyDepartmentApp extends Game {
         } finally {
             this.avatarDirectoryBusyUserId = null;
             this.refreshSceneNavigatorOverlay();
+            this.scheduleAvatarDirectoryRefresh(true);
         }
     }
 
@@ -2629,6 +3106,12 @@ export class ThisIsMyDepartmentApp extends Game {
         const activeOwners = new Set<string>();
         presences.forEach(presence => {
             activeOwners.add(presence.ownerUserId);
+
+            if (this.despawningSpawnedAvatarOwners.has(presence.ownerUserId)) {
+                this.pendingSpawnedAvatarReplacements.set(presence.ownerUserId, presence);
+                return;
+            }
+
             const existingNode = this.spawnedAvatarNodes.get(presence.ownerUserId);
             const shouldRecreate = forceRecreate
                 || !existingNode
@@ -2638,20 +3121,14 @@ export class ThisIsMyDepartmentApp extends Game {
             let node = existingNode;
             if (shouldRecreate) {
                 if (existingNode) {
+                    this.pendingSpawnedAvatarReplacements.set(presence.ownerUserId, presence);
                     if (this.activeLLMConversation?.agent === existingNode) {
                         this.closeLLMConversation(existingNode);
                     }
-                    existingNode.remove();
+                    this.despawnSpawnedAvatarNode(presence.ownerUserId, existingNode);
+                    return;
                 }
-                node = new LLMAgentNode({
-                    id: `spawned-avatar-${presence.ownerUserId}`,
-                    agentId: presence.agentId,
-                    spriteIndex: presence.spriteIndex,
-                    displayName: presence.displayName,
-                    caption: this.t("navigator.avatars.caption")
-                });
-                this.getGameScene().rootNode.appendChild(node);
-                this.spawnedAvatarNodes.set(presence.ownerUserId, node);
+                node = this.createSpawnedAvatarNode(presence);
             }
 
             node!.setNavigation({
@@ -2667,12 +3144,96 @@ export class ThisIsMyDepartmentApp extends Game {
             if (activeOwners.has(ownerUserId)) {
                 return;
             }
+            this.pendingSpawnedAvatarReplacements.delete(ownerUserId);
             if (this.activeLLMConversation?.agent === node) {
                 this.closeLLMConversation(node);
             }
-            node.remove();
-            this.spawnedAvatarNodes.delete(ownerUserId);
+            this.despawnSpawnedAvatarNode(ownerUserId, node);
         });
+    }
+
+    private createSpawnedAvatarNode(presence: SpawnedAvatarPresence): LLMAgentNode {
+        const node = new LLMAgentNode({
+            id: `spawned-avatar-${presence.ownerUserId}`,
+            agentId: presence.agentId,
+            spriteIndex: presence.spriteIndex,
+            displayName: presence.displayName,
+            caption: this.t("navigator.avatars.caption")
+        });
+        this.getGameScene().rootNode.appendChild(node);
+        this.spawnedAvatarNodes.set(presence.ownerUserId, node);
+        return node;
+    }
+
+    private despawnSpawnedAvatarNode(ownerUserId: string, node: LLMAgentNode): void {
+        if (this.despawningSpawnedAvatarOwners.has(ownerUserId)) {
+            return;
+        }
+
+        this.despawningSpawnedAvatarOwners.add(ownerUserId);
+        this.spawnedAvatarNodes.delete(ownerUserId);
+        node.setNavigation({});
+        node.setDirection(SimpleDirection.NONE);
+        this.emitSpawnedAvatarDespawnParticles(node);
+
+        const startOpacity = node.getOpacity();
+        node.addAnimation(new Animator((target, value) => {
+            target.setOpacity(startOpacity * (1 - value));
+        }, { duration: SPAWNED_AVATAR_DESPAWN_DURATION_MS / 1000 }));
+
+        window.setTimeout(() => {
+            node.remove();
+            this.despawningSpawnedAvatarOwners.delete(ownerUserId);
+
+            const pendingPresence = this.pendingSpawnedAvatarReplacements.get(ownerUserId);
+            if (pendingPresence && this.spawnedAvatarPresences.get(ownerUserId)?.agentId === pendingPresence.agentId) {
+                this.pendingSpawnedAvatarReplacements.delete(ownerUserId);
+                const replacementNode = this.createSpawnedAvatarNode(pendingPresence);
+                replacementNode.moveTo(pendingPresence.position.x, pendingPresence.position.y);
+                replacementNode.setNavigation({
+                    summonTarget: pendingPresence.summonPosition,
+                    walkArea: pendingPresence.wanderArea
+                });
+                return;
+            }
+
+            this.pendingSpawnedAvatarReplacements.delete(ownerUserId);
+        }, SPAWNED_AVATAR_DESPAWN_DURATION_MS + 40);
+    }
+
+    private emitSpawnedAvatarDespawnParticles(node: LLMAgentNode): void {
+        if (!this.isInGameScene()) {
+            return;
+        }
+
+        const position = node.getScenePosition();
+        const emitter = new ParticleNode({
+            x: position.x,
+            y: position.y - Math.max(8, node.height * 0.18),
+            layer: Layer.OVERLAY,
+            velocity: () => {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 28 + (Math.random() * 52);
+                return {
+                    x: Math.cos(angle) * speed,
+                    y: 18 + Math.sin(angle) * speed
+                };
+            },
+            color: () => {
+                const colors = ["rgba(255, 255, 255, 0.95)", "rgba(147, 236, 255, 0.92)", "rgba(130, 178, 255, 0.82)"];
+                return colors[Math.floor(Math.random() * colors.length)];
+            },
+            size: () => 4 + (Math.random() * 7),
+            gravity: { x: 0, y: -42 },
+            breakFactor: 0.2,
+            lifetime: () => 0.26 + (Math.random() * 0.22),
+            alphaCurve: valueCurves.cos(0.08, 0.78),
+            sizeCurve: valueCurves.cubic.invert(),
+            angleSpeed: () => (Math.random() - 0.5) * 8
+        }).appendTo(this.getGameScene().rootNode);
+
+        emitter.emit(SPAWNED_AVATAR_DESPAWN_PARTICLE_COUNT);
+        window.setTimeout(() => emitter.remove(), 900);
     }
 
     private touchSpawnedAvatarAgent(agentId: string): void {

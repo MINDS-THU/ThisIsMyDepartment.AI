@@ -28,6 +28,13 @@ interface GridDirection {
     cost: number;
 }
 
+interface PathSearchState {
+    goalCell: GridCell;
+    goalHeuristic: number;
+    gScore: number;
+    key: string;
+}
+
 const buildCellKey = (col: number, row: number): string => `${col},${row}`;
 const straightMoveCost = 1;
 const diagonalMoveCost = Math.SQRT2;
@@ -115,6 +122,44 @@ const canTraverseDiagonal = (from: GridCell, direction: GridDirection, options: 
     return !isCellBlocked(horizontalNeighbor, options) && !isCellBlocked(verticalNeighbor, options);
 };
 
+const findNearestUnblockedCell = (goalCell: GridCell, options: GridPathfinderOptions): GridCell | null => {
+    if (!isCellBlocked(goalCell, options)) {
+        return goalCell;
+    }
+
+    const extents = getGridExtents(options);
+    const maxRadius = Math.max(extents.maxCol + 1, extents.maxRow + 1);
+    for (let radius = 1; radius <= maxRadius; ++radius) {
+        let bestCell: GridCell | null = null;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (let row = goalCell.row - radius; row <= goalCell.row + radius; ++row) {
+            for (let col = goalCell.col - radius; col <= goalCell.col + radius; ++col) {
+                const onRing = Math.abs(col - goalCell.col) === radius || Math.abs(row - goalCell.row) === radius;
+                if (!onRing) {
+                    continue;
+                }
+
+                const candidate = { col, row };
+                if (isCellBlocked(candidate, options)) {
+                    continue;
+                }
+
+                const distance = heuristic(candidate, goalCell);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestCell = candidate;
+                }
+            }
+        }
+
+        if (bestCell) {
+            return bestCell;
+        }
+    }
+
+    return null;
+};
+
 const expandDiagonalSteps = (cells: GridCell[], options: GridPathfinderOptions): GridCell[] => {
     if (cells.length <= 1) {
         return cells;
@@ -184,8 +229,13 @@ export const findGridPath = (options: GridPathfinderOptions): Vector2[] | null =
     }
 
     const startCell = toGridCell(options.start.x, options.start.y, options);
-    const goalCell = toGridCell(options.goal.x, options.goal.y, options);
-    if (isCellBlocked(startCell, options) || isCellBlocked(goalCell, options)) {
+    const requestedGoalCell = toGridCell(options.goal.x, options.goal.y, options);
+    if (isCellBlocked(startCell, options)) {
+        return null;
+    }
+
+    const goalCell = findNearestUnblockedCell(requestedGoalCell, options);
+    if (!goalCell) {
         return null;
     }
 
@@ -200,6 +250,12 @@ export const findGridPath = (options: GridPathfinderOptions): Vector2[] | null =
     const cameFrom = new Map<string, string>();
     const gScores = new Map<string, number>([[startKey, 0]]);
     const closed = new Set<string>();
+    let bestReached: PathSearchState = {
+        goalCell: startCell,
+        goalHeuristic: heuristic(startCell, requestedGoalCell),
+        gScore: 0,
+        key: startKey
+    };
 
     while (openNodes.length > 0) {
         openNodes.sort((left, right) => left.fScore - right.fScore);
@@ -207,6 +263,18 @@ export const findGridPath = (options: GridPathfinderOptions): Vector2[] | null =
         if (closed.has(current.key)) {
             continue;
         }
+
+        const currentGoalHeuristic = heuristic(current, requestedGoalCell);
+        if (currentGoalHeuristic < bestReached.goalHeuristic
+            || (currentGoalHeuristic === bestReached.goalHeuristic && current.gScore < bestReached.gScore)) {
+            bestReached = {
+                goalCell: { col: current.col, row: current.row },
+                goalHeuristic: currentGoalHeuristic,
+                gScore: current.gScore,
+                key: current.key
+            };
+        }
+
         if (current.key === goalKey) {
             return reconstructPath(cameFrom, current.key, options, options.goal);
         }
@@ -245,6 +313,10 @@ export const findGridPath = (options: GridPathfinderOptions): Vector2[] | null =
                 fScore: tentativeGScore + heuristic(nextCell, goalCell)
             });
         });
+    }
+
+    if (bestReached.key !== startKey) {
+        return reconstructPath(cameFrom, bestReached.key, options, toWorldPoint(bestReached.goalCell, options));
     }
 
     return null;

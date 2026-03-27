@@ -487,6 +487,19 @@ button {
     min-height: 0;
 }
 
+.timd-scene-navigator__group-heading {
+    margin-top: 8px;
+    color: #9fb5e8;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.timd-scene-navigator__group-heading:first-child {
+    margin-top: 0;
+}
+
 .timd-scene-navigator__item {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -504,11 +517,42 @@ button {
     min-width: 0;
 }
 
+.timd-scene-navigator__item-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
 .timd-scene-navigator__item-title {
     color: #eef3ff;
     font-size: 13px;
     font-weight: 700;
     line-height: 1.25;
+}
+
+.timd-scene-navigator__badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0.03em;
+}
+
+.timd-scene-navigator__badge--online {
+    background: rgba(38, 168, 84, 0.2);
+    border: 1px solid rgba(80, 216, 128, 0.4);
+    color: #7ff0a4;
+}
+
+.timd-scene-navigator__badge--summoned {
+    background: rgba(86, 129, 255, 0.18);
+    border: 1px solid rgba(132, 170, 255, 0.38);
+    color: #c9dcff;
 }
 
 .timd-scene-navigator__action {

@@ -2,7 +2,8 @@ import type { Server as HttpServer } from "http";
 import { getServerConfig } from "../config";
 import { getSessionIdFromCookieHeader } from "../auth/session";
 import { appendMockActivity } from "../storage/memory/activityStore";
-import { getSessionContext } from "../storage/memory/bootstrapStore";
+import { getBuiltInEnvironmentAvatarDefinitions, getSessionContext } from "../storage/memory/bootstrapStore";
+import type { AgentDefinition } from "../../../shared/types";
 
 const createSocketServer = require("socket.io") as (server: HttpServer, options?: Record<string, unknown>) => any;
 
@@ -51,6 +52,7 @@ const serverConfig = getServerConfig();
 const rooms = new Map<string, RoomState>();
 const socketIndex = new Map<string, { roomId: string; userId: string }>();
 const SPAWNED_AVATAR_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+let activeIo: SocketServerLike | null = null;
 
 const getOrCreateRoom = (roomId: string): RoomState => {
     const existing = rooms.get(roomId);
@@ -86,6 +88,7 @@ const buildRoomInfoPayload = (room: RoomState, extra?: Record<string, unknown>):
     users: getRoomDisplayNames(room),
     userIds: Array.from(room.users.keys()),
     spawnedAvatars: Array.from(room.spawnedAvatarPresences.values()),
+    environmentAvatars: getBuiltInEnvironmentAvatarDefinitions(),
     gameTime: room.gameTime,
     ...extra
 });
@@ -115,6 +118,31 @@ const emitRoomInfo = (io: SocketServerLike, room: RoomState, extra?: Record<stri
     io.to(room.roomId).emit("roomInfo", buildRoomInfoPayload(room, extra));
 };
 
+const clearSpawnedAvatarsForTargetUser = (io: SocketServerLike, targetUserId: string): void => {
+    const normalizedUserId = targetUserId.trim();
+    if (!normalizedUserId) {
+        return;
+    }
+
+    rooms.forEach(room => {
+        let changed = false;
+        room.spawnedAvatarPresences.forEach((presence, ownerUserId) => {
+            if (presence.targetUserId !== normalizedUserId) {
+                return;
+            }
+
+            room.spawnedAvatarPresences.delete(ownerUserId);
+            changed = true;
+        });
+
+        if (changed) {
+            emitRoomInfo(io, room, {
+                spawnedAvatarDismissedUserId: normalizedUserId
+            });
+        }
+    });
+};
+
 const getRoomUsers = (roomId: string): string[] => {
     return getRoomDisplayNames(getOrCreateRoom(roomId));
 };
@@ -131,6 +159,17 @@ export const isUserConnected = (userId: string): boolean => {
     }
 
     return false;
+};
+
+export const broadcastEnvironmentAvatarUpsert = (avatar: AgentDefinition): void => {
+    if (!activeIo || avatar.ownerUserId) {
+        return;
+    }
+
+    rooms.forEach(room => {
+        activeIo!.to(room.roomId).emit("environmentAvatarUpsert", avatar);
+        activeIo!.to(room.roomId).emit("roomInfo", buildRoomInfoPayload(room));
+    });
 };
 
 const resolveRoomId = (socket: SocketLike): string => {
@@ -261,6 +300,7 @@ export const attachRealtimeServer = (httpServer: HttpServer): { getRoomUsers: (r
         cookie: false,
         path: "/socket.io"
     });
+    activeIo = io;
 
     io.on("connection", (socket: SocketLike) => {
         const identity = resolveIdentityFromSocket(socket);
@@ -288,6 +328,8 @@ export const attachRealtimeServer = (httpServer: HttpServer): { getRoomUsers: (r
         if (!room.hostUserId || !room.users.has(room.hostUserId)) {
             room.hostUserId = user.userId;
         }
+
+        clearSpawnedAvatarsForTargetUser(io, user.userId);
 
         socketIndex.set(socket.id, { roomId, userId: user.userId });
         socket.join(roomId);

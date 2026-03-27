@@ -19,9 +19,16 @@ interface ConversationCache {
 }
 
 export class LLMAgentNode extends NpcNode {
+    private static readonly aiNameSuffix = " (AI)";
     private static readonly collisionStuckThreshold = 0.18;
+    private static readonly navigationStallThreshold = 0.9;
+    private static readonly navigationProgressThreshold = 6;
+    private static readonly navigationSegmentSampleStep = 6;
     private static readonly detourStep = 28;
     private static readonly detourForward = 52;
+    private static readonly recoverySearchRadiusStep = 36;
+    private static readonly recoverySearchRingCount = 4;
+    private static readonly recoverySearchSamplesPerRing = 16;
     private static readonly maxRandomPointAttempts = 12;
     private static readonly navigationCellSizeFallback = 32;
     private static readonly navigationCellSubdivision = 2;
@@ -40,6 +47,8 @@ export class LLMAgentNode extends NpcNode {
     private pathSearchFailureSignature: string | null = null;
     private idleTimer = 0;
     private pauseDuration = 0;
+    private navigationStallTimer = 0;
+    private lastNavigationSample?: Vector2;
 
     private conversations = new Map<string, ConversationCache>();
 
@@ -53,7 +62,7 @@ export class LLMAgentNode extends NpcNode {
         this.setCaption(this.defaultCaption);
         this.setInteractionActionLabel("Chat with");
         this.setInteractionLabel(this.displayName);
-        this.setNameLabel(this.displayName);
+        this.setNameLabel(`${this.displayName}${LLMAgentNode.aiNameSuffix}`);
         if (args.walkArea) {
             this.wanderArea = {
                 minX: args.walkArea.x,
@@ -82,6 +91,8 @@ export class LLMAgentNode extends NpcNode {
         this.pathSearchFailureSignature = null;
         this.idleTimer = 0;
         this.pauseDuration = this.randomPause();
+        this.navigationStallTimer = 0;
+        this.lastNavigationSample = undefined;
         if (args.walkArea) {
             this.wanderArea = {
                 minX: args.walkArea.x,
@@ -113,6 +124,8 @@ export class LLMAgentNode extends NpcNode {
                 this.detourWaypoints = [];
                 this.pathSearchFailureSignature = null;
                 this.idleTimer = 0;
+                this.navigationStallTimer = 0;
+                this.lastNavigationSample = undefined;
             }
         }
 
@@ -134,7 +147,14 @@ export class LLMAgentNode extends NpcNode {
                 this.advanceTargetQueue();
                 this.idleTimer = 0;
                 this.pauseDuration = this.randomPause();
+                this.navigationStallTimer = 0;
+                this.lastNavigationSample = undefined;
                 this.setDirection(SimpleDirection.NONE);
+                return;
+            }
+
+            if (this.isNavigationStalled(dt)) {
+                this.recoverFromNavigationStall(finalTarget);
                 return;
             }
 
@@ -158,7 +178,7 @@ export class LLMAgentNode extends NpcNode {
             const x = this.wanderArea!.minX + Math.random() * (this.wanderArea!.maxX - this.wanderArea!.minX);
             const y = this.wanderArea!.minY + Math.random() * (this.wanderArea!.maxY - this.wanderArea!.minY);
             const point = this.clampPointToBounds(new Vector2(x, y));
-            if (this.canOccupyPosition(point.x, point.y)) {
+            if (this.canOccupyPosition(point.x, point.y) && (this.hasDirectPathTo(point) || this.buildPathToTarget(point))) {
                 return point;
             }
         }
@@ -230,11 +250,58 @@ export class LLMAgentNode extends NpcNode {
         if (this.summonTarget) {
             this.summonTarget = undefined;
             this.pathSearchFailureSignature = null;
+            this.navigationStallTimer = 0;
+            this.lastNavigationSample = undefined;
             return;
         }
 
         this.currentTarget = undefined;
         this.pathSearchFailureSignature = null;
+        this.navigationStallTimer = 0;
+        this.lastNavigationSample = undefined;
+    }
+
+    private isNavigationStalled(dt: number): boolean {
+        const current = new Vector2(this.getX(), this.getY());
+        if (!this.lastNavigationSample) {
+            this.lastNavigationSample = current;
+            this.navigationStallTimer = 0;
+            return false;
+        }
+
+        const delta = Math.hypot(current.x - this.lastNavigationSample.x, current.y - this.lastNavigationSample.y);
+        if (delta >= LLMAgentNode.navigationProgressThreshold) {
+            this.lastNavigationSample = current;
+            this.navigationStallTimer = 0;
+            return false;
+        }
+
+        this.navigationStallTimer += dt;
+        return this.navigationStallTimer >= LLMAgentNode.navigationStallThreshold;
+    }
+
+    private recoverFromNavigationStall(finalTarget: Vector2): void {
+        this.pathWaypoints = [];
+        this.detourWaypoints = [];
+        this.pathSearchFailureSignature = null;
+        this.lastNavigationSample = undefined;
+        this.navigationStallTimer = 0;
+
+        const replannedPath = this.findRecoveryPath(finalTarget);
+        if (replannedPath && replannedPath.length > 0) {
+            this.applyResolvedPath(finalTarget, replannedPath);
+            this.setDirection(SimpleDirection.NONE);
+            return;
+        }
+
+        if (this.summonTarget) {
+            this.summonTarget = undefined;
+        } else {
+            this.currentTarget = undefined;
+        }
+        this.idleTimer = 0;
+        this.pauseDuration = this.randomPause();
+        this.setDirection(SimpleDirection.NONE);
     }
 
     private tryResolveStuck(finalTarget: Vector2, activeTarget: Vector2, deltaX: number, deltaY: number): boolean {
@@ -246,11 +313,12 @@ export class LLMAgentNode extends NpcNode {
 
         this.pathWaypoints = [];
         this.pathSearchFailureSignature = null;
+        this.lastNavigationSample = undefined;
+        this.navigationStallTimer = 0;
         if (!this.hasDirectPathTo(finalTarget)) {
-            const replannedPath = this.buildPathToTarget(finalTarget);
+            const replannedPath = this.findRecoveryPath(finalTarget);
             if (replannedPath && replannedPath.length > 0) {
-                this.pathWaypoints = replannedPath;
-                this.detourWaypoints = [];
+                this.applyResolvedPath(finalTarget, replannedPath);
                 this.consecutiveXCollisions = 0;
                 this.consecutiveYCollisions = 0;
                 this.setDirection(SimpleDirection.NONE);
@@ -296,7 +364,10 @@ export class LLMAgentNode extends NpcNode {
             for (const offset of offsets) {
                 const sidestep = this.clampPointToBounds(new Vector2(current.x, current.y + offset));
                 const forwardPoint = this.clampPointToBounds(new Vector2(current.x + forward, current.y + offset));
-                if (this.canOccupyPosition(sidestep.x, sidestep.y) && this.canOccupyPosition(forwardPoint.x, forwardPoint.y)) {
+                if (this.canOccupyPosition(sidestep.x, sidestep.y)
+                    && this.canOccupyPosition(forwardPoint.x, forwardPoint.y)
+                    && this.hasDirectPathBetween(current, sidestep)
+                    && this.hasDirectPathBetween(sidestep, forwardPoint)) {
                     return [sidestep, forwardPoint];
                 }
             }
@@ -307,14 +378,19 @@ export class LLMAgentNode extends NpcNode {
             for (const offset of offsets) {
                 const sidestep = this.clampPointToBounds(new Vector2(current.x + offset, current.y));
                 const forwardPoint = this.clampPointToBounds(new Vector2(current.x + offset, current.y + forward));
-                if (this.canOccupyPosition(sidestep.x, sidestep.y) && this.canOccupyPosition(forwardPoint.x, forwardPoint.y)) {
+                if (this.canOccupyPosition(sidestep.x, sidestep.y)
+                    && this.canOccupyPosition(forwardPoint.x, forwardPoint.y)
+                    && this.hasDirectPathBetween(current, sidestep)
+                    && this.hasDirectPathBetween(sidestep, forwardPoint)) {
                     return [sidestep, forwardPoint];
                 }
             }
         }
 
         const finalTarget = this.clampPointToBounds(activeTarget.clone());
-        return this.canOccupyPosition(finalTarget.x, finalTarget.y) ? [finalTarget] : null;
+        return this.canOccupyPosition(finalTarget.x, finalTarget.y) && this.hasDirectPathBetween(current, finalTarget)
+            ? [finalTarget]
+            : null;
     }
 
     private clampPointToBounds(point: Vector2): Vector2 {
@@ -343,57 +419,151 @@ export class LLMAgentNode extends NpcNode {
 
         const path = this.buildPathToTarget(target);
         if (path && path.length > 0) {
-            this.pathWaypoints = path;
+            this.applyResolvedPath(target, path);
             this.pathSearchFailureSignature = null;
             return;
         }
 
         this.pathSearchFailureSignature = failureSignature;
+        if (this.summonTarget) {
+            this.summonTarget = undefined;
+        } else {
+            this.currentTarget = undefined;
+        }
+    }
+
+    private applyResolvedPath(requestedTarget: Vector2, path: Vector2[]): void {
+        const sanitizedPath = this.sanitizePath(path);
+        this.pathWaypoints = sanitizedPath;
+        this.detourWaypoints = [];
+
+        const resolvedTarget = sanitizedPath[sanitizedPath.length - 1];
+        if (!resolvedTarget) {
+            return;
+        }
+
+        const targetDelta = Math.hypot(resolvedTarget.x - requestedTarget.x, resolvedTarget.y - requestedTarget.y);
+        if (targetDelta > this.getWaypointArrivalDistance()) {
+            const snappedTarget = resolvedTarget.clone();
+            if (this.summonTarget === requestedTarget) {
+                this.summonTarget = snappedTarget;
+            } else if (this.currentTarget === requestedTarget) {
+                this.currentTarget = snappedTarget;
+            }
+        }
     }
 
     private buildPathToTarget(target: Vector2): Vector2[] | null {
+        return this.buildPathBetween(new Vector2(this.getX(), this.getY()), target);
+    }
+
+    private buildPathBetween(start: Vector2, target: Vector2): Vector2[] | null {
         const navigationBounds = this.getNavigationBounds();
         if (!navigationBounds) {
             return null;
         }
 
         return findGridPath({
-            start: { x: this.getX(), y: this.getY() },
+            start: { x: start.x, y: start.y },
             goal: { x: target.x, y: target.y },
             minX: navigationBounds.minX,
             minY: navigationBounds.minY,
             maxX: navigationBounds.maxX,
             maxY: navigationBounds.maxY,
             cellSize: navigationBounds.cellSize,
-            isBlocked: (x, y) => this.hasLevelCollisionAt(x, y)
+            isBlocked: (x, y) => this.isNavigationBlockedAt(x, y)
         });
     }
 
     private hasDirectPathTo(target: Vector2): boolean {
+        return this.hasDirectPathBetween(new Vector2(this.getX(), this.getY()), target);
+    }
+
+    private hasDirectPathBetween(start: Vector2, target: Vector2): boolean {
         const navigationBounds = this.getNavigationBounds();
         if (!navigationBounds) {
             return true;
         }
 
-        const distance = Math.hypot(target.x - this.getX(), target.y - this.getY());
+        const distance = Math.hypot(target.x - start.x, target.y - start.y);
         if (distance <= navigationBounds.cellSize / 2) {
-            return true;
+            return this.canOccupyPosition(target.x, target.y);
         }
 
-        const steps = Math.max(1, Math.ceil(distance / Math.max(8, navigationBounds.cellSize / 2)));
+        const steps = Math.max(1, Math.ceil(distance / Math.max(LLMAgentNode.navigationSegmentSampleStep, navigationBounds.cellSize / 3)));
         for (let i = 1; i <= steps; ++i) {
             const ratio = i / steps;
-            const x = this.getX() + ((target.x - this.getX()) * ratio);
-            const y = this.getY() + ((target.y - this.getY()) * ratio);
+            const x = start.x + ((target.x - start.x) * ratio);
+            const y = start.y + ((target.y - start.y) * ratio);
             if (x < navigationBounds.minX || x > navigationBounds.maxX || y < navigationBounds.minY || y > navigationBounds.maxY) {
                 return false;
             }
-            if (this.hasLevelCollisionAt(x, y)) {
+            if (this.isNavigationBlockedAt(x, y)) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private isNavigationBlockedAt(x: number, y: number): boolean {
+        return this.hasLevelCollisionAt(x, y) || this.collidesWithCharacterAt(x, y);
+    }
+
+    private sanitizePath(path: Vector2[]): Vector2[] {
+        if (path.length === 0) {
+            return path;
+        }
+
+        const sanitized: Vector2[] = [];
+        let cursor = new Vector2(this.getX(), this.getY());
+        for (const waypoint of path) {
+            if (!this.canOccupyPosition(waypoint.x, waypoint.y)) {
+                break;
+            }
+            if (!this.hasDirectPathBetween(cursor, waypoint)) {
+                break;
+            }
+            sanitized.push(waypoint);
+            cursor = waypoint;
+        }
+
+        return sanitized;
+    }
+
+    private findRecoveryPath(finalTarget: Vector2): Vector2[] | null {
+        const directReplan = this.buildPathToTarget(finalTarget);
+        if (directReplan && directReplan.length > 0) {
+            return directReplan;
+        }
+
+        const current = new Vector2(this.getX(), this.getY());
+        const baseAngle = Math.atan2(finalTarget.y - current.y, finalTarget.x - current.x);
+        for (let ring = 1; ring <= LLMAgentNode.recoverySearchRingCount; ++ring) {
+            const radius = ring * LLMAgentNode.recoverySearchRadiusStep;
+            for (let sample = 0; sample < LLMAgentNode.recoverySearchSamplesPerRing; ++sample) {
+                const angle = baseAngle + ((Math.PI * 2 * sample) / LLMAgentNode.recoverySearchSamplesPerRing);
+                const candidate = this.clampPointToBounds(new Vector2(
+                    current.x + (Math.cos(angle) * radius),
+                    current.y + (Math.sin(angle) * radius)
+                ));
+
+                if (!this.canOccupyPosition(candidate.x, candidate.y) || !this.hasDirectPathBetween(current, candidate)) {
+                    continue;
+                }
+
+                if (this.hasDirectPathBetween(candidate, finalTarget)) {
+                    return [candidate, finalTarget.clone()];
+                }
+
+                const continuation = this.buildPathBetween(candidate, finalTarget);
+                if (continuation && continuation.length > 0) {
+                    return [candidate, ...continuation];
+                }
+            }
+        }
+
+        return null;
     }
 
     private getNavigationBounds(): { minX: number; minY: number; maxX: number; maxY: number; cellSize: number } | null {
