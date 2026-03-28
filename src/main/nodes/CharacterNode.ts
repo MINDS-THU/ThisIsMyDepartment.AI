@@ -215,7 +215,6 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
         } else {
             this.dialogNode.setText("");
         }
-
         if (this.hasLevelCollisionAt(this.x, this.y)) {
             this.unstuck();
         }
@@ -286,11 +285,16 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
     }
 
     public say(line = "", duration = 5, delay = 0): void {
-        // Speech bubbles are disabled; keep state clean and notify listeners only.
-        this.speakSince = 0;
-        this.speakUntil = 0;
-        this.speakLine = "";
-        this.dialogNode.setText("");
+        if (!line) {
+            this.speakLine = "";
+            this.speakUntil = 0;
+            this.speakSince = 0;
+            this.dialogNode.setText("");
+            return;
+        }
+        this.speakLine = line;
+        this.speakSince = this.gameTime + delay;
+        this.speakUntil = this.speakSince + duration;
         this.emitEvent("say", line);
     }
 
@@ -305,10 +309,6 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
         const w = bounds.width, h = bounds.height;
         const px = bounds.minX + x - this.getX(), py = bounds.minY + y - this.getY();
         return colliders.some(c => c.collidesWithRectangle(px, py, w, h));
-    }
-
-    public hasSceneCollisionAt(x = this.getX(), y = this.getY()): boolean {
-        return this.hasLevelCollisionAt(x, y);
     }
 
     @cacheResult
