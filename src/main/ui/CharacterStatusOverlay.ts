@@ -26,6 +26,7 @@ export class CharacterStatusOverlay {
     private statusValue?: HTMLDivElement;
     private audioToggleButton?: HTMLButtonElement;
     private videoToggleButton?: HTMLButtonElement;
+    private sttToggleButton?: HTMLButtonElement;
     private app?: ThisIsMyDepartmentApp;
     private collapsed = false;
     private lastSnapshotKey = "";
@@ -65,6 +66,7 @@ export class CharacterStatusOverlay {
         this.statusValue = undefined;
         this.audioToggleButton = undefined;
         this.videoToggleButton = undefined;
+        this.sttToggleButton = undefined;
         this.app = undefined;
         this.lastSnapshotKey = "";
         this.statsUserId = "";
@@ -103,7 +105,8 @@ export class CharacterStatusOverlay {
             hasAvatar: !!profile?.avatar,
             connected: this.app.onlineService?.isConnected() ?? false,
             audioEnabled: this.app.isLocalAudioEnabled(),
-            videoEnabled: this.app.isLocalVideoEnabled()
+            videoEnabled: this.app.isLocalVideoEnabled(),
+            transcriptionEnabled: this.app.isTranscriptionEnabled
         });
 
         if (snapshotKey !== this.lastSnapshotKey) {
@@ -225,7 +228,7 @@ export class CharacterStatusOverlay {
 
         const mediaButtons = document.createElement("div");
         mediaButtons.style.display = "grid";
-        mediaButtons.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))";
+        mediaButtons.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))"; 
         mediaButtons.style.gap = "6px";
         mediaButtons.style.marginTop = "2px";
         this.audioToggleButton = this.createMediaButton(app.t("status.audio.off"), () => {
@@ -236,8 +239,15 @@ export class CharacterStatusOverlay {
             this.app?.toggleLocalVideo();
             this.refresh();
         });
+        this.sttToggleButton = this.createMediaButton(app.isTranscriptionEnabled ? "STT ON" : "STT OFF", () => {
+            const currentState = this.app?.isTranscriptionEnabled ?? true;
+            this.app?.toggleTranscriptionSetting(!currentState);
+            this.refresh();
+        });
+
         mediaButtons.appendChild(this.audioToggleButton);
         mediaButtons.appendChild(this.videoToggleButton);
+        mediaButtons.appendChild(this.sttToggleButton);
         identity.appendChild(mediaButtons);
 
         const statsGrid = document.createElement("div");
@@ -514,6 +524,16 @@ export class CharacterStatusOverlay {
                 ? CharacterStatusOverlay.BUTTON_BACKGROUND_ACTIVE
                 : CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;
             this.videoToggleButton.style.borderColor = videoEnabled
+                ? "rgba(122, 170, 255, 0.38)"
+                : CharacterStatusOverlay.BORDER_COLOR;
+        }
+        if (this.sttToggleButton) {
+            const sttEnabled = this.app.isTranscriptionEnabled;
+            this.sttToggleButton.textContent = sttEnabled ? "STT ON" : "STT OFF";
+            this.sttToggleButton.style.background = sttEnabled
+                ? CharacterStatusOverlay.BUTTON_BACKGROUND_ACTIVE
+                : CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;
+            this.sttToggleButton.style.borderColor = sttEnabled
                 ? "rgba(122, 170, 255, 0.38)"
                 : CharacterStatusOverlay.BORDER_COLOR;
         }

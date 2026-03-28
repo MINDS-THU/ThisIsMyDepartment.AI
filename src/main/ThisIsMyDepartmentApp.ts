@@ -127,6 +127,7 @@ export class ThisIsMyDepartmentApp extends Game {
     private npcs: CharacterNode[] = [];
     private players: Record<string, OtherPlayerNode> = {};
     public room: JitsiConference | null = null;
+    public isTranscriptionEnabled: boolean = true;
     public userId: string = "anonymous-user";
     public userName: string = "anonymous";
     public sessionId: string = "local-session";
@@ -239,7 +240,6 @@ export class ThisIsMyDepartmentApp extends Game {
     public getAgentDefinitions(): readonly LLMAgentDefinition[] {
         return this.agentDefinitions;
     }
-
     public constructor(agentDefinitions: LLMAgentDefinition[], bootstrapState: BootstrapState) {
         super();
         this.applyBootstrapState(bootstrapState);
@@ -310,20 +310,8 @@ export class ThisIsMyDepartmentApp extends Game {
                     this.getPlayer().say(speechText, Math.max(3, text.length * 0.2));
                     return;
                 }
-                const otherPlayers = this.getGameScene()?.rootNode.getDescendantsByType<OtherPlayerNode>(OtherPlayerNode);
-                const filteredPlayers = otherPlayers
-                    ?.filter(p => p.getPosition().getDistance(this.getPlayer().getPosition()) < 50)
-                    .map(p => p.getId()!) ?? [];
-                if (filteredPlayers.length > 0) {
-                    filteredPlayers.forEach(p => {
-                        this.room?.sendMessage(speechText, p);
-                    });
-                    this.handleOutgoingPlayerChat(filteredPlayers, speechText);
-                } else {
-                    this.room?.sendMessage(speechText);
-                    this.handleOutgoingBroadcastChat(speechText);
-                }
-                this.getPlayer().say(speechText, Math.max(3, text.length * 0.2));
+                console.log("未打开对话框，STT语音转录已拦截。");
+                return; 
             });
         }
 
@@ -412,13 +400,11 @@ export class ThisIsMyDepartmentApp extends Game {
     public toggleLocalAudio(): boolean {
         const mediaControls = this.ensureMediaControls();
         const enabled = mediaControls.toggleLocalAudio();
-        
-        if (enabled) {
+        if (enabled && this.isTranscriptionEnabled) {
             void this.sttService?.start();
         } else {
             this.sttService?.stop();
         }
-
         this.refreshConversationMediaState();
         this.characterStatusOverlay?.refresh();
         return enabled;
@@ -516,19 +502,30 @@ export class ThisIsMyDepartmentApp extends Game {
         }
 
         mediaControls.setLocalAudioEnabled(enabled);
-
+        if (enabled && this.isTranscriptionEnabled) {
+            void this.sttService?.start();
+        } else {
+            this.sttService?.stop();
+        }
         if (enabled) {
             void this.sttService?.start();
         } else {
             this.sttService?.stop();
         }
-        // -----------------------
-
         await this.syncConversationMediaState();
         this.characterStatusOverlay?.refresh();
         return mediaControls.isLocalAudioEnabled();
     }
-
+    public toggleTranscriptionSetting(enable: boolean): void {
+        this.isTranscriptionEnabled = enable;
+        if (this.isLocalAudioEnabled()) {
+            if (enable) {
+                void this.sttService?.start();
+            } else {
+                this.sttService?.stop();
+            }
+        }
+    }
     public async setLocalVideoEnabled(enabled: boolean): Promise<boolean> {
         const mediaControls = this.ensureMediaControls();
         if (enabled === mediaControls.isLocalVideoEnabled()) {
