@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package#",
   "name": "thisismydepartment-ai",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "A self-hostable virtual department environment with backend-managed identity, activity logging, and AI characters.",
   "maintainers": [],
   "keywords": [
@@ -13,7 +13,15 @@
     "department"
   ],
   "private": true,
-  "license": "SEE LICENSE IN LICENSE.md",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MINDS-THU/ThisIsMyDepartment.AI.git"
+  },
+  "homepage": "https://github.com/MINDS-THU/ThisIsMyDepartment.AI",
+  "bugs": {
+    "url": "https://github.com/MINDS-THU/ThisIsMyDepartment.AI/issues"
+  },
   "main": ".webpack/main",
   "scripts": {
     "clean": "rimraf lib dist out",
@@ -25,7 +33,7 @@
     "server:build": "npm --prefix server run build",
     "server:start": "npm --prefix server run start",
     "server:dev": "npm --prefix server run dev",
-    "markdownlint": "markdownlint -c ./.markdownlint.json -i node_modules/ -i dist/ -i out/ .",
+    "markdownlint": "markdownlint -c ./.markdownlint.json -i node_modules/ -i server/node_modules -i dist/ -i out/ .",
     "htmlhint": "htmlhint ./index.html",
     "eslint": "eslint --ext .ts ./src/",
     "lint": "npm run -s markdownlint && npm run -s htmlhint && npm run -s eslint",
@@ -61,7 +69,7 @@
     "@typescript-eslint/parser": "^4.1.0",
     "copy-webpack-plugin": "6.2.0",
     "cspell": "4.1.0",
-    "electron": "^10.4.4",
+    "electron": "^11.5.0",
     "eslint": "^7.8.1",
     "generate-json-webpack-plugin": "^1.0.0",
     "git-revision-webpack-plugin": "^3.0.6",

@@ -1,7 +1,7 @@
 import type { AgentDefinition, AppSession, BootstrapResponse, ClientType, DepartmentUser, UserProfile, VerifiedIdentity } from "../../../../shared/types";
-import { buildBuiltInEnvironmentAvatarDefinitions, getBuiltInEnvironmentAvatarIds } from "../../config/builtInEnvironmentAvatars";
+import { buildBuiltInEnvironmentAvatarDefinitions } from "../../config/builtInEnvironmentAvatars";
 import { getServerConfig } from "../../config";
-import { deleteSessionRecord, getCharacterRecord, getExternalIdentityUserId, getProfileRecord, getSessionRecord, getUserRecord, listCharacterRecords, listUserRecords, setCharacterRecord, setExternalIdentityUserId, setProfileRecord, setSessionRecord, setUserRecord } from "../stateStore";
+import { deleteCharacterRecord, deleteSessionRecord, getCharacterRecord, getExternalIdentityUserId, getProfileRecord, getSessionRecord, getUserRecord, listCharacterRecords, listUserRecords, setCharacterRecord, setExternalIdentityUserId, setProfileRecord, setSessionRecord, setUserRecord } from "../stateStore";
 
 const now = () => new Date().toISOString();
 
@@ -11,6 +11,11 @@ const sessionTtlSeconds = serverConfig.sessionTtlSeconds;
 const LEGACY_SEEDED_CHARACTER_NAMES: Record<string, string> = {
     "chuanhao-bot": "李传浩老师",
     "chenwang-bot": "王琛老师"
+};
+
+const LEGACY_AGENT_ID_MIGRATION: Record<string, string> = {
+    "chuanhao-bot": "or-teacher-bot",
+    "chenwang-bot": "ie-teacher-bot"
 };
 
 function buildConfiguredDefaultAgentRoute(): Pick<AgentDefinition, "provider" | "model"> {
@@ -95,9 +100,16 @@ const createEnvironmentAvatarAgentId = (displayName: string): string => {
 
 const ensureSeededCharacters = (): AgentDefinition[] => {
     const builtInDefinitions = seededCharacters();
-    const builtInCharacterIds = new Set(getBuiltInEnvironmentAvatarIds());
     const persistedCharacters = listCharacterRecords();
     const persistedById = new Map(persistedCharacters.map(character => [character.agentId, character]));
+
+    // Migrate legacy agentIds (e.g. chuanhao-bot → or-teacher-bot)
+    Object.entries(LEGACY_AGENT_ID_MIGRATION).forEach(([oldId, newId]) => {
+        const legacyRecord = persistedById.get(oldId);
+        if (legacyRecord && !persistedById.has(newId)) {
+            deleteCharacterRecord(oldId);
+        }
+    });
 
     builtInDefinitions.forEach(character => {
         const persistedCharacter = persistedById.get(character.agentId);
@@ -123,9 +135,7 @@ const ensureSeededCharacters = (): AgentDefinition[] => {
     });
 
     const characters = listCharacterRecords();
-    const filteredCharacters = (characters.length > 0 ? characters : builtInDefinitions)
-        .filter(character => character.ownerUserId || builtInCharacterIds.has(character.agentId));
-    return filteredCharacters.map(cloneCharacterDefinition);
+    return (characters.length > 0 ? characters : builtInDefinitions).map(cloneCharacterDefinition);
 };
 
 export const getMockBootstrapResponse = (): BootstrapResponse => ({
@@ -158,6 +168,85 @@ const createSessionId = (userId: string): string => {
     return `session-${userId}-${Date.now()}`;
 };
 
+const normalizeOptionalText = (value: string | undefined): string | undefined => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : undefined;
+};
+
+const hasAiHostingConfiguration = (profile: UserProfile): boolean => {
+    const aiHosting = profile.aiHosting;
+    return Boolean(
+        aiHosting?.coreIdentity?.trim()
+        || aiHosting?.speakingStyle?.trim()
+        || aiHosting?.interactionGoals?.trim()
+        || aiHosting?.relationshipGuidance?.trim()
+        || aiHosting?.boundaries?.trim()
+        || aiHosting?.additionalInstructions?.trim()
+        || profile.characterSystemPrompt?.trim()
+    );
+};
+
+export const isAiHostingEnabled = (profile: UserProfile): boolean => profile.aiHosting?.enabled !== false;
+
+export const buildPublicPersonaSummary = (user: DepartmentUser, profile: UserProfile): string => {
+    const lines = [
+        `Name: ${user.displayName}.`,
+        user.organization ? `Organization: ${user.organization}.` : "",
+        user.department ? `Department: ${user.department}.` : "",
+        user.roles.length > 0 ? `Roles: ${user.roles.join(", ")}.` : "",
+        profile.publicPersona?.additionalDescription?.trim()
+            ? `Additional role description: ${profile.publicPersona.additionalDescription.trim()}.`
+            : ""
+    ].filter(Boolean);
+
+    return lines.join("\n");
+};
+
+export const buildLegacyCharacterSystemPrompt = (profile: UserProfile): string => {
+    const aiHosting = profile.aiHosting;
+    const sections = [
+        aiHosting?.coreIdentity?.trim() ? `Core identity: ${aiHosting.coreIdentity.trim()}` : "",
+        aiHosting?.speakingStyle?.trim() ? `Speaking style: ${aiHosting.speakingStyle.trim()}` : "",
+        aiHosting?.interactionGoals?.trim() ? `Interaction goals: ${aiHosting.interactionGoals.trim()}` : "",
+        aiHosting?.relationshipGuidance?.trim() ? `Relationship guidance: ${aiHosting.relationshipGuidance.trim()}` : "",
+        aiHosting?.boundaries?.trim() ? `Boundaries: ${aiHosting.boundaries.trim()}` : "",
+        aiHosting?.additionalInstructions?.trim() ? `Additional instructions: ${aiHosting.additionalInstructions.trim()}` : ""
+    ].filter(Boolean);
+    return sections.join("\n");
+};
+
+export const buildHostedUserBaseSystemPrompt = (user: DepartmentUser, profile: UserProfile): string => {
+    const sections = [
+        `You are the AI-hosted representation of ${user.displayName}. Speak in first person as this real department member and preserve their identity faithfully.`,
+        `Your visible role description:\n${buildPublicPersonaSummary(user, profile)}`
+    ];
+
+    if (profile.aiHosting?.coreIdentity?.trim()) {
+        sections.push(`Core identity to preserve:\n${profile.aiHosting.coreIdentity.trim()}`);
+    }
+    if (profile.aiHosting?.speakingStyle?.trim()) {
+        sections.push(`Speaking style:\n${profile.aiHosting.speakingStyle.trim()}`);
+    }
+    if (profile.aiHosting?.interactionGoals?.trim()) {
+        sections.push(`Interaction goals:\n${profile.aiHosting.interactionGoals.trim()}`);
+    }
+    if (profile.aiHosting?.relationshipGuidance?.trim()) {
+        sections.push(`Relationship guidance:\n${profile.aiHosting.relationshipGuidance.trim()}`);
+    }
+    if (profile.aiHosting?.boundaries?.trim()) {
+        sections.push(`Boundaries:\n${profile.aiHosting.boundaries.trim()}`);
+    }
+    if (profile.aiHosting?.additionalInstructions?.trim()) {
+        sections.push(`Additional instructions:\n${profile.aiHosting.additionalInstructions.trim()}`);
+    }
+    if (!hasAiHostingConfiguration(profile) && profile.characterSystemPrompt?.trim()) {
+        sections.push(`Legacy custom instructions:\n${profile.characterSystemPrompt.trim()}`);
+    }
+
+    sections.push("Use prior conversation history and recent activity context when relevant. Do not invent personal facts that are not supported by the known profile or history.");
+    return sections.join("\n\n");
+};
+
 const getProfileByUserId = (userId: string): UserProfile => {
     const existingProfile = getProfileRecord(userId);
     if (existingProfile) {
@@ -167,6 +256,18 @@ const getProfileByUserId = (userId: string): UserProfile => {
     const createdProfile: UserProfile = {
         userId,
         characterSystemPrompt: "",
+        publicPersona: {
+            additionalDescription: ""
+        },
+        aiHosting: {
+            enabled: true,
+            coreIdentity: "",
+            speakingStyle: "",
+            interactionGoals: "",
+            relationshipGuidance: "",
+            boundaries: "",
+            additionalInstructions: ""
+        },
         preferences: {},
         updatedAt: now()
     };
@@ -176,18 +277,7 @@ const getProfileByUserId = (userId: string): UserProfile => {
 const createUserAvatarAgentId = (userId: string): string => `user-avatar-${userId}`;
 
 const buildUserAvatarSystemPrompt = (user: DepartmentUser, profile: UserProfile): string => {
-    const customPrompt = profile.characterSystemPrompt?.trim();
-    if (customPrompt) {
-        return customPrompt;
-    }
-
-    const identitySummary = [
-        user.organization ? `Organization: ${user.organization}.` : "",
-        user.department ? `Department: ${user.department}.` : "",
-        user.roles.length > 0 ? `Roles: ${user.roles.join(", ")}.` : ""
-    ].filter(Boolean).join(" ");
-
-    return `You are the AI representation of ${user.displayName}. Speak in first person as this department member. Use prior activity context when available, stay grounded in known facts, and explicitly say when you do not know something. ${identitySummary}`.trim();
+    return buildHostedUserBaseSystemPrompt(user, profile);
 };
 
 const buildConfiguredAvatarModelRoute = (): Pick<AgentDefinition, "provider" | "model"> => buildConfiguredDefaultAgentRoute();
@@ -391,6 +481,16 @@ export const updateBuiltInEnvironmentAvatarDefinition = (character: AgentDefinit
     });
 };
 
+export const deleteBuiltInEnvironmentAvatarDefinition = (agentId: string): boolean => {
+    const existing = getCharacterRecord(agentId);
+    if (!existing || existing.ownerUserId) {
+        return false;
+    }
+
+    deleteCharacterRecord(agentId);
+    return true;
+};
+
 export const updateAvatarProfileForUser = (userId: string, spriteIndex: number): UserProfile => {
     const currentProfile = getProfileByUserId(userId);
     const updatedProfile: UserProfile = {
@@ -411,6 +511,37 @@ export const updateCharacterSystemPromptForUser = (userId: string, prompt: strin
         characterSystemPrompt: prompt,
         updatedAt: now()
     };
+    return setProfileRecord(updatedProfile);
+};
+
+export const updatePublicPersonaForUser = (userId: string, publicPersona: UserProfile["publicPersona"]): UserProfile => {
+    const currentProfile = getProfileByUserId(userId);
+    const updatedProfile: UserProfile = {
+        ...currentProfile,
+        publicPersona: {
+            additionalDescription: normalizeOptionalText(publicPersona?.additionalDescription) ?? ""
+        },
+        updatedAt: now()
+    };
+    return setProfileRecord(updatedProfile);
+};
+
+export const updateAiHostingProfileForUser = (userId: string, aiHosting: UserProfile["aiHosting"]): UserProfile => {
+    const currentProfile = getProfileByUserId(userId);
+    const updatedProfile: UserProfile = {
+        ...currentProfile,
+        aiHosting: {
+            enabled: aiHosting?.enabled !== false,
+            coreIdentity: normalizeOptionalText(aiHosting?.coreIdentity) ?? "",
+            speakingStyle: normalizeOptionalText(aiHosting?.speakingStyle) ?? "",
+            interactionGoals: normalizeOptionalText(aiHosting?.interactionGoals) ?? "",
+            relationshipGuidance: normalizeOptionalText(aiHosting?.relationshipGuidance) ?? "",
+            boundaries: normalizeOptionalText(aiHosting?.boundaries) ?? "",
+            additionalInstructions: normalizeOptionalText(aiHosting?.additionalInstructions) ?? ""
+        },
+        updatedAt: now()
+    };
+    updatedProfile.characterSystemPrompt = buildLegacyCharacterSystemPrompt(updatedProfile);
     return setProfileRecord(updatedProfile);
 };
 

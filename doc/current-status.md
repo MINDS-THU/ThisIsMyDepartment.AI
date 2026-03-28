@@ -1,168 +1,105 @@
-# ThisIsMyDepartment.AI Current Status
+# Current Status
 
-This document summarizes what is already implemented in the repository, what remains intentionally incomplete, and what a new host should understand before treating the project as release-ready.
+This document summarizes what is implemented, what is still in progress, and known technical constraints.
 
-## Completed so far
+## Implemented Features
 
-### Identity and auth
+### Authentication and Identity
 
-Implemented:
+* Session bootstrap via `GET /api/bootstrap`
+* Session creation via `POST /auth/handoff` (shared-secret, JWT, or insecure dev mode)
+* Reverse-proxy header login via `GET /auth/proxy-login`
+* Embedded auth bridge via `GET /auth/postmessage-bridge`
+* Fallback login page at `GET /auth/login` for local development
+* Stable user IDs derived from normalized verified identity
+* Logout via `POST /auth/logout`
 
-* backend-owned session bootstrap via `GET /api/bootstrap`
-* session creation via `POST /auth/handoff`
-* fallback local login page via `GET /auth/login`
-* reverse-proxy header login via `GET /auth/proxy-login`
-* embedded auth bridge via `GET /auth/postmessage-bridge`
-* stable user IDs derived from normalized verified identity
+### User Profiles
 
-### Profiles and onboarding
+* First-time avatar onboarding (sprite selection before entering the world)
+* Persisted avatar updates via `PUT /api/me/profile`
+* User profile lookup via `GET /api/me`
+* In-game settings UI for changing avatar, display name, and media devices
 
-Implemented:
+### Data Persistence
 
-* first-time avatar onboarding restored
-* persisted avatar updates via `PUT /api/me/profile`
-* current user and profile lookup via `GET /api/me`
-* in-game settings UI for avatar updates
+* SQLite-backed storage for users, sessions, profiles, activities, and conversations
+* Automatic migration from legacy `server/data/state.json` on first startup
+* Default database: `server/data/state.sqlite`
 
-### Persistence
+### Activity Logging
 
-Implemented:
+Server-side logging of:
 
-* SQLite-backed backend state by default
-* persisted users, sessions, profiles, activities, and conversations
-* automatic migration from legacy `server/data/state.json` into SQLite on first startup of an empty database
-
-Default state database:
-
-```text
-server/data/state.sqlite
-```
-
-### Activity logging
-
-Implemented:
-
-* player chat logging
-* AI-character chat logging
-* room join and leave logging
-* avatar update logging
-* character prompt update logging
-* iframe open, close, and URL-change logging
+* Player chat messages
+* AI character conversations
+* Room join and leave events
+* Avatar appearance updates
+* Character prompt updates
+* Iframe open, close, and URL changes
 
 ### Conversations
 
-Implemented:
+* Persistent player-to-player conversation storage
+* Persistent user-to-AI-agent conversation storage
+* AI-authored messages are visually labeled in the conversation window
 
-* persisted player-to-player conversation storage
-* persisted user-to-agent conversation storage
-* frontend conversation window backed by server-side conversation APIs
-* AI-authored messages are labeled in the conversation window so users can distinguish agent replies from human-authored lines
+### AI Characters
 
-### AI characters
+* Backend-routed chat via `/api/agents` and `/api/agents/:agentId/chat`
+* User-editable system prompt for the user's own AI-controlled stand-in
+* AI characters wander with collision-aware pathfinding
+* Overhead name labels with "(AI)" suffix for AI characters
+* LLM provider support: **OpenRouter**, **OpenAI**, **mock** (offline fallback)
+* Agent definitions as `*.agent.ts` files with auto-generated registry
 
-Implemented:
+### Real-Time Multiplayer
 
-* backend-routed agent chat through `/api/agents` and `/api/agents/:agentId/chat`
-* shared chat path for teacher and student AI-controlled characters
-* user-editable prompt for the user's own offline AI-controlled character
-* deployment-owned default teacher characters seeded into persistence when missing
-* AI-controlled avatars can wander with collision-aware pathfinding instead of walking directly into blocked tiles
+* Integrated Socket.IO room server in the backend process
+* Avatar movement, chat, and presence sync
+* Stable user ID handling for join, leave, and reconnect
+* Summoned avatar presence shared through room sync
+* Repeatable smoke test script (`scripts/realtimeSmokeTest.js`)
 
-Current provider support:
+### Navigation and UI
 
-* mock provider
-* OpenRouter provider via `OPENROUTER_API_KEY`
-* OpenAI provider via `OPENAI_API_KEY`
+* Scene navigator overlay for room teleport shortcuts
+* Avatar directory for browsing users and summoning offline AI stand-ins
+* Collapsible side panels for character status and navigation
+* Overhead name labels for all characters (players, other players, AI characters)
 
-### Realtime and room sync
+### Frontend Runtime
 
-Implemented:
+* Browser entry: `ThisIsMyDepartmentApp`
+* Backend-bound requests include credentials
+* Jitsi disabled on localhost unless explicitly configured
+* Webpack dev server proxies `/api`, `/auth`, and `/socket.io` to backend
+* Copyable `.env` templates for frontend and backend
 
-* integrated Socket.IO room server inside the backend package
-* frontend room sync using the backend as the authoritative multiplayer server
-* stable user ID handling for join, leave, reconnect, and character updates
-* summoned avatar presence is shared through the same authoritative room-sync path
-* repeatable realtime smoke test script in `scripts/realtimeSmokeTest.js`
+## Known Limitations
 
-### In-world navigation and operator UX
+### Node Version Split
 
-Implemented:
+The frontend toolchain requires Node 16.20.2 (Volta-pinned). The backend requires Node 20+ for `better-sqlite3`. This is a known friction point; use nvm or Volta to switch between versions.
 
-* scene navigator overlay for room teleport shortcuts
-* avatar directory for browsing known users and summoning AI-managed avatar stand-ins when the owner is offline
-* collapsible character-status and navigator side panels to preserve viewport space on smaller screens
-* terminology cleanup in the current UI so avatar-related flows describe summoning rather than ad hoc generation
+### Socket.IO v2
 
-### Frontend runtime cleanup already done
+The browser client uses `socket.io-client@2.3.0`. Upgrading requires coordinated client and server changes and is tracked as future work.
 
-Implemented:
+### Single-Process Backend
 
-* browser runtime entry now uses `ThisIsMyDepartmentApp`
-* backend-bound browser requests include credentials
-* localhost Jitsi auto-connect is gated behind explicit config to avoid `/http-bind` noise during normal local development
-* settings and dialogue UI are now aligned with the current backend-driven model
-* copyable frontend and backend environment templates now exist for local and production setup
+The backend runs as a single Node.js process with SQLite. This is suitable for small-to-medium deployments (a department or lab) but not for horizontal scaling.
 
-## Current supported local deployment shape
+### Jitsi on Localhost
 
-Supported and tested shape:
+Voice and video are disabled on localhost unless `TIMD_JITSI_*` variables are configured. This avoids browser errors from missing `/http-bind` endpoints.
 
-1. Run backend on `127.0.0.1:8787`.
-2. Run frontend webpack dev server on `127.0.0.1:8000`.
-3. Let frontend bootstrap from backend.
-4. Use fallback login locally or configure one of the supported auth handoff modes.
+### Provider Coverage
 
-## What is still incomplete
+Currently supported LLM providers: OpenRouter, OpenAI, and mock. Azure, Ollama, and other providers are not yet implemented.
 
-These are known non-final areas, not hidden surprises:
+## Related Documents
 
-* broader provider support beyond mock, OpenAI, and OpenRouter
-* remaining cleanup of historical asset names, demo copy, and archived reference material
-* modernization of the legacy frontend packaging and Socket.IO dependency stack
-* alignment of the repository on a cleaner single-runtime story for the legacy frontend toolchain and the newer backend SQLite dependency
-* public release polish for docs, templates, and maintainer metadata
-* broader end-to-end testing coverage and more explicit deployment validation
-
-## Important technical constraints
-
-### Node version
-
-The repository currently has split runtime expectations:
-
-* the root frontend toolchain still carries a Node `16.20.2` Volta pin from the legacy webpack and Electron stack
-* the backend currently depends on `better-sqlite3@12.x`, whose published engine support targets newer Node releases
-
-This does not block development, but it is an honest release-readiness issue and should be treated as remaining cleanup rather than hidden complexity.
-
-### Frontend build behavior
-
-The frontend dev server serves emitted files from `lib/`.
-
-That means:
-
-* source edits in `src/` are not sufficient by themselves
-* if the browser does not reflect a visual or logic change, verify the corresponding file in `lib/` was regenerated
-
-### Jitsi behavior on localhost
-
-On localhost:
-
-* Jitsi stays disabled unless explicit `TIMD_JITSI_*` variables are configured
-* this is intentional to avoid repeated local `/http-bind` browser errors when no Jitsi server is present
-
-## Release-readiness summary
-
-The repository is now suitable for continued development, internal pilots, and controlled self-hosting work, but it should still be treated as a project in active cleanup rather than a fully polished public release.
-
-Practical interpretation:
-
-* good enough for continued implementation and pilot deployment work
-* good enough to demonstrate the complete backend-managed identity, persistence, and integrated agent architecture
-* not yet fully documented or polished enough to call the open-source release finished
-
-## Where to look next
-
-* [doc/getting-started.md](doc/getting-started.md) for install and local usage
-* [doc/auth-integration.md](doc/auth-integration.md) for upstream login handoff patterns
-* [doc/hosting.md](doc/hosting.md) for deployment guidance
-* [doc/open-source-release-checklist.md](doc/open-source-release-checklist.md) for the remaining release cleanup work
+* [getting-started.md](getting-started.md) -- install and run locally
+* [auth-integration.md](auth-integration.md) -- connect a real login system
+* [hosting.md](hosting.md) -- deploy to production

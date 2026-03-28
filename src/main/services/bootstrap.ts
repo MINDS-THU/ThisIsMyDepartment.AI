@@ -20,6 +20,18 @@ const createFallbackBootstrapState = (): BootstrapState => ({
             updatedAt: now()
         },
         characterSystemPrompt: "",
+        publicPersona: {
+            additionalDescription: ""
+        },
+        aiHosting: {
+            enabled: true,
+            coreIdentity: "",
+            speakingStyle: "",
+            interactionGoals: "",
+            relationshipGuidance: "",
+            boundaries: "",
+            additionalInstructions: ""
+        },
         preferences: {},
         updatedAt: now()
     },

@@ -5,8 +5,62 @@ import { sendJson } from "../http/response";
 import { listActivitiesForUser } from "../storage/memory/activityStore";
 import { ConversationMessage, ConversationParticipantRef, getConversationForParticipants, saveConversationMessages, withConversationSystemPrompt } from "../storage/memory/conversationStore";
 import { generateAgentReply } from "../services/agentChat";
-import { createOrUpdateAvatarAgentForUser, getCharacterDefinitionById, getCharacterDefinitions, getCurrentProfileForUser, getCurrentUserById, getSessionContext, listCurrentUsers } from "../storage/memory/bootstrapStore";
+import { buildHostedUserBaseSystemPrompt, buildPublicPersonaSummary, createOrUpdateAvatarAgentForUser, getCharacterDefinitionById, getCharacterDefinitions, getCurrentProfileForUser, getCurrentUserById, getSessionContext, isAiHostingEnabled, listCurrentUsers } from "../storage/memory/bootstrapStore";
 import { isUserConnected } from "../services/realtimeServer";
+
+const hasConfiguredAiHosting = (profile: ReturnType<typeof getCurrentProfileForUser>): boolean => {
+    return Boolean(
+        profile.characterSystemPrompt?.trim()
+        || profile.aiHosting?.coreIdentity?.trim()
+        || profile.aiHosting?.speakingStyle?.trim()
+        || profile.aiHosting?.interactionGoals?.trim()
+        || profile.aiHosting?.relationshipGuidance?.trim()
+        || profile.aiHosting?.boundaries?.trim()
+        || profile.aiHosting?.additionalInstructions?.trim()
+    );
+};
+
+const formatRecentActivities = (userId: string): string => {
+    const activities = listActivitiesForUser(userId, 8);
+    if (activities.length === 0) {
+        return "";
+    }
+
+    return activities.slice(-5).map(activity => {
+        const target = activity.targetId ? ` -> ${activity.targetId}` : "";
+        return `${activity.createdAt}: ${activity.type}${target}`;
+    }).join("\n");
+};
+
+const buildEffectiveConversationSystemPrompt = (args: {
+    agentDefaultPrompt?: string;
+    personaUserId: string;
+    personaUserName?: string;
+    personaProfile: ReturnType<typeof getCurrentProfileForUser>;
+    personaUser?: ReturnType<typeof getCurrentUserById>;
+    counterpartProfile: ReturnType<typeof getCurrentProfileForUser>;
+    counterpartUser: NonNullable<ReturnType<typeof getCurrentUserById>>;
+}): string => {
+    const sections: string[] = [];
+
+    if (args.personaUser) {
+        sections.push(buildHostedUserBaseSystemPrompt(args.personaUser, args.personaProfile));
+    } else if (args.agentDefaultPrompt?.trim()) {
+        sections.push(args.agentDefaultPrompt.trim());
+    }
+
+    sections.push(`Current counterpart:\n${buildPublicPersonaSummary(args.counterpartUser, args.counterpartProfile)}`);
+
+    const recentActivities = formatRecentActivities(args.personaUserId);
+    if (recentActivities) {
+        sections.push(`Recent activity context for the represented persona:\n${recentActivities}`);
+    }
+
+    sections.push("Use the existing conversation history to preserve continuity. Adapt your tone, degree of formality, and response strategy to the counterpart's role description and the relationship implied by prior dialogue.");
+    sections.push("Do not invent personal facts, commitments, or hidden preferences that are not supported by the known profile, recent activity, or conversation history.");
+
+    return sections.join("\n\n");
+};
 
 const buildAgentParticipants = (args: {
     userId: string;
@@ -86,7 +140,8 @@ export const handleListUsersRoute = (request: IncomingMessage, response: ServerR
             roles: user.roles,
             avatar: profile.avatar,
             isOnline: isUserConnected(user.userId),
-            hasCharacterSystemPrompt: Boolean(profile.characterSystemPrompt?.trim()),
+            hasCharacterSystemPrompt: hasConfiguredAiHosting(profile),
+            aiHostingEnabled: isAiHostingEnabled(profile),
             updatedAt: profile.updatedAt
         };
     });
@@ -131,6 +186,11 @@ export const handleSpawnAvatarAgentRoute = async (request: IncomingMessage, resp
         }
 
         const profile = getCurrentProfileForUser(targetUserId);
+        if (!isAiHostingEnabled(profile)) {
+            sendJson(request, response, 403, { error: "Target user has disabled AI hosting" });
+            return;
+        }
+
         if (!profile.avatar) {
             sendJson(request, response, 400, { error: "Target user does not have a saved avatar yet" });
             return;
@@ -178,7 +238,16 @@ export const handleChatWithAgentRoute = async (request: IncomingMessage, respons
         const personaUserId = agent.ownerUserId ?? user.userId;
         const personaProfile = agent.ownerUserId ? getCurrentProfileForUser(personaUserId) : sessionContext.profile;
         const personaUser = agent.ownerUserId ? getCurrentUserById(personaUserId) : sessionContext.user;
-        const effectiveSystemPrompt = personaProfile.characterSystemPrompt?.trim() || agent.defaultSystemPrompt;
+        const counterpartProfile = sessionContext.profile;
+        const effectiveSystemPrompt = buildEffectiveConversationSystemPrompt({
+            agentDefaultPrompt: agent.defaultSystemPrompt,
+            personaUserId,
+            personaUserName: personaUser?.displayName,
+            personaProfile,
+            personaUser,
+            counterpartProfile,
+            counterpartUser: user
+        });
         const userName = payload.playerName ?? user.displayName;
         const participants = buildAgentParticipants({
             userId: user.userId,
@@ -190,6 +259,7 @@ export const handleChatWithAgentRoute = async (request: IncomingMessage, respons
         });
         const conversation = getConversationForParticipants(participants);
         const preparedMessages = withConversationSystemPrompt(conversation?.messages ?? [], effectiveSystemPrompt);
+        const activities = listActivitiesForUser(personaUserId, 10);
 
         const nextHistory = preparedMessages.concat(createUserMessage({
             userId: user.userId,
@@ -203,7 +273,7 @@ export const handleChatWithAgentRoute = async (request: IncomingMessage, respons
             message,
             history: nextHistory,
             profile: personaProfile,
-            activities: listActivitiesForUser(personaUserId, 10),
+            activities,
             metadata: personaUser ? {
                 ownerUserId: personaUser.userId,
                 ownerDisplayName: personaUser.displayName

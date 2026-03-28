@@ -3,8 +3,8 @@ import type { AgentDefinition } from "../../../shared/types";
 import { getSessionIdFromRequest } from "../auth/session";
 import { parseJsonBody } from "../http/body";
 import { sendJson } from "../http/response";
-import { broadcastEnvironmentAvatarUpsert } from "../services/realtimeServer";
-import { createBuiltInEnvironmentAvatarDefinition, getBuiltInEnvironmentAvatarDefinitions, getCharacterDefinitionById, getSessionContext, updateBuiltInEnvironmentAvatarDefinition } from "../storage/memory/bootstrapStore";
+import { broadcastEnvironmentAvatarUpsert, broadcastEnvironmentAvatarDelete } from "../services/realtimeServer";
+import { createBuiltInEnvironmentAvatarDefinition, deleteBuiltInEnvironmentAvatarDefinition, getBuiltInEnvironmentAvatarDefinitions, getCharacterDefinitionById, getSessionContext, updateBuiltInEnvironmentAvatarDefinition } from "../storage/memory/bootstrapStore";
 
 const requireAdminSession = (request: IncomingMessage, response: ServerResponse) => {
     const sessionContext = getSessionContext(getSessionIdFromRequest(request));
@@ -218,4 +218,28 @@ export const handleUpdateAdminEnvironmentAvatarRoute = async (
     } catch (_error) {
         sendJson(request, response, 400, { error: "Invalid JSON payload" });
     }
+};
+
+export const handleDeleteAdminEnvironmentAvatarRoute = (
+    request: IncomingMessage,
+    response: ServerResponse,
+    agentId: string
+): void => {
+    if (!requireAdminSession(request, response)) {
+        return;
+    }
+
+    const existing = getCharacterDefinitionById(agentId);
+    if (!existing || existing.ownerUserId) {
+        sendJson(request, response, 404, { error: "Unknown environment avatar" });
+        return;
+    }
+
+    if (!deleteBuiltInEnvironmentAvatarDefinition(agentId)) {
+        sendJson(request, response, 400, { error: "Could not delete environment avatar" });
+        return;
+    }
+
+    broadcastEnvironmentAvatarDelete(agentId);
+    sendJson(request, response, 200, { deleted: true, agentId });
 };

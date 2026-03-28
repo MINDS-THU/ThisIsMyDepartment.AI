@@ -17,8 +17,6 @@ import { DialogNode } from "./DialogNode";
 import { InteractiveNode } from "./InteractiveNode";
 import { NpcNode } from "./NpcNode";
 import { ParticleNode, valueCurves } from "./ParticleNode";
-import { TextNode } from "../../engine/scene/TextNode";
-
 export enum PreCharacterTags {
     FRONT = "Front",
     BACK = "Back",
@@ -77,7 +75,8 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
     private particleAngle = 0;
 
     private dialogNode: DialogNode;
-    private nameLabel?: TextNode<ThisIsMyDepartmentApp>;
+    private nameLabelText = "";
+    private static readonly nameLabelFont = "10px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif";
 
     protected speakerNode?: SceneNode;
     protected shareAudioId?: string;
@@ -216,12 +215,6 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
         } else {
             this.dialogNode.setText("");
         }
-
-        if (this.nameLabel) {
-            const offset = this.height + 8;
-            this.nameLabel.moveTo(0, -offset);
-        }
-
         if (this.hasLevelCollisionAt(this.x, this.y)) {
             this.unstuck();
         }
@@ -306,23 +299,7 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
     }
 
     public setNameLabel(name: string | null): void {
-        const trimmed = name?.trim() ?? "";
-        if (!trimmed) {
-            this.nameLabel?.remove();
-            this.nameLabel = undefined;
-            return;
-        }
-        if (!this.nameLabel) {
-            this.nameLabel = new TextNode<ThisIsMyDepartmentApp>({
-                font: ThisIsMyDepartmentApp.smallFont,
-                color: "#ffffff",
-                outlineColor: "#000000",
-                fallbackFont: "14px 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', sans-serif",
-                layer: Layer.OVERLAY
-            });
-            this.appendChild(this.nameLabel);
-        }
-        this.nameLabel.setText(trimmed);
+        this.nameLabelText = name?.trim() ?? "";
     }
 
     protected hasLevelCollisionAt(x = this.getX(), y = this.getY()): boolean {
@@ -443,6 +420,19 @@ export abstract class CharacterNode extends OnlineSceneNode<ThisIsMyDepartmentAp
         super.draw(ctx);
         if (this.inGhostMode) {
             ctx.globalAlpha = 1;
+        }
+        if (this.nameLabelText) {
+            ctx.save();
+            ctx.font = CharacterNode.nameLabelFont;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "bottom";
+            const cx = this.width / 2;
+            ctx.strokeStyle = "#000000";
+            ctx.lineWidth = 2;
+            ctx.strokeText(this.nameLabelText, cx, -2);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(this.nameLabelText, cx, -2);
+            ctx.restore();
         }
     }
 }

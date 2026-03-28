@@ -140,10 +140,11 @@ export class CharacterStatusOverlay {
         root.className = "timd-character-status";
         root.style.position = "fixed";
         root.style.top = "16px";
-        root.style.left = "16px";
+        root.style.left = "0";
         root.style.zIndex = "9998";
         root.style.pointerEvents = "auto";
-        root.style.width = "312px";
+        root.style.width = "calc(min(312px, calc(100vw - var(--timd-sidebar-collapsed-width))) + var(--timd-sidebar-collapsed-width))";
+        root.style.setProperty("--timd-panel-width", "min(312px, calc(100vw - var(--timd-sidebar-collapsed-width)))");
         root.style.color = CharacterStatusOverlay.PANEL_TEXT;
         root.style.fontFamily = getUiFontStack(app.getLanguage());
 
@@ -154,7 +155,6 @@ export class CharacterStatusOverlay {
         panel.style.border = `1px solid ${CharacterStatusOverlay.BORDER_COLOR}`;
         panel.style.background = CharacterStatusOverlay.PANEL_BACKGROUND;
         panel.style.boxShadow = "0 22px 56px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05)";
-        panel.style.clipPath = "polygon(0 10px, 10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px))";
 
         const trim = document.createElement("div");
         trim.style.position = "absolute";
@@ -164,10 +164,6 @@ export class CharacterStatusOverlay {
         trim.style.left = "5px";
         trim.style.pointerEvents = "none";
         trim.style.border = "1px solid rgba(164, 190, 255, 0.12)";
-        trim.style.clipPath = "polygon(0 8px, 8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px))";
-
-        const collapseButton = this.createCollapseButton();
-        this.collapseButton = collapseButton;
 
         const header = document.createElement("div");
         header.style.display = "grid";
@@ -287,18 +283,22 @@ export class CharacterStatusOverlay {
         actions.appendChild(this.createActionButton(app.t("status.action.settings"), () => this.app?.openSettingsOverlay("media"), true));
 
         panel.appendChild(trim);
-        panel.appendChild(collapseButton);
         panel.appendChild(header);
         panel.appendChild(metaGrid);
         panel.appendChild(actions);
+
+        const collapseButton = this.createCollapseButton();
+        this.collapseButton = collapseButton;
+
         root.appendChild(panel);
+        root.appendChild(collapseButton);
         return root;
     }
 
     private createCollapseButton(): HTMLButtonElement {
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "timd-sidebar-toggle timd-sidebar-toggle--character";
+        button.className = "timd-sidebar-rail timd-sidebar-rail--character";
         button.onclick = () => {
             this.collapsed = !this.collapsed;
             this.applyCollapsedState();
@@ -314,7 +314,7 @@ export class CharacterStatusOverlay {
 
         this.root.classList.toggle("timd-character-status--collapsed", this.collapsed);
         if (this.collapseButton) {
-            this.collapseButton.textContent = this.collapsed ? "›" : "‹";
+            this.collapseButton.textContent = this.collapsed ? "»" : "«";
             this.collapseButton.title = this.collapsed ? "Expand character panel" : "Collapse character panel";
             this.collapseButton.setAttribute("aria-label", this.collapseButton.title);
         }

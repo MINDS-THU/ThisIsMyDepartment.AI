@@ -2,10 +2,21 @@ import { getStoredMediaDevicePreference } from "../constants";
 import { AppLanguage, getCodeFontStack, getUiFontStack, translate } from "../i18n";
 import { EditableEnvironmentAvatar } from "../services/environmentAvatarAdmin";
 import { ThisIsMyDepartmentApp } from "../ThisIsMyDepartmentApp";
+import type { CurrentUser, CurrentUserAiHostingProfile, CurrentUserPublicPersona } from "../types/currentUser";
 
 type SettingsTabId = "media" | "language" | "character" | "ai-prompt" | "environment-avatars";
 type MediaDeviceKind = "audioinput" | "audiooutput" | "videoinput";
 type EnvironmentAvatarPlacementMode = "position" | "walk-area";
+
+const createEmptyAiHostingProfile = (): CurrentUserAiHostingProfile => ({
+    enabled: true,
+    coreIdentity: "",
+    speakingStyle: "",
+    interactionGoals: "",
+    relationshipGuidance: "",
+    boundaries: "",
+    additionalInstructions: ""
+});
 
 interface EnvironmentAvatarPlacementResult {
     position?: { x: number; y: number };
@@ -20,19 +31,23 @@ interface MediaDeviceOption {
 
 interface SettingsOverlayOpenArgs {
     initialTab?: SettingsTabId;
+    currentUser?: CurrentUser;
     initialLanguage: AppLanguage;
     initialSpriteIndex: number;
-    initialPrompt: string;
+    initialPublicPersona?: CurrentUserPublicPersona;
+    initialAiHosting?: CurrentUserAiHostingProfile;
     initialAudioEnabled: boolean;
     initialVideoEnabled: boolean;
     canManageEnvironmentAvatars?: boolean;
     getMediaDevices: () => Promise<MediaDeviceOption[]>;
     onAvatarSave: (spriteIndex: number) => Promise<void>;
-    onPromptSave: (prompt: string) => Promise<void>;
+    onPublicPersonaSave: (publicPersona: CurrentUserPublicPersona) => Promise<void>;
+    onAiHostingSave: (aiHosting: CurrentUserAiHostingProfile) => Promise<void>;
     onLanguageSave: (language: AppLanguage) => Promise<void>;
     loadEnvironmentAvatars?: () => Promise<EditableEnvironmentAvatar[]>;
     onEnvironmentAvatarCreate?: (seed?: Partial<EditableEnvironmentAvatar>) => Promise<EditableEnvironmentAvatar>;
     onEnvironmentAvatarSave?: (avatar: EditableEnvironmentAvatar) => Promise<EditableEnvironmentAvatar>;
+    onEnvironmentAvatarDelete?: (agentId: string) => Promise<void>;
     onEnvironmentAvatarPlacementStart?: (avatar: EditableEnvironmentAvatar, mode: EnvironmentAvatarPlacementMode) => Promise<EnvironmentAvatarPlacementResult | null>;
     onEnvironmentAvatarPlacementCancel?: () => void;
     onMediaToggle: (kind: Extract<MediaDeviceKind, "audioinput" | "videoinput">, enabled: boolean) => Promise<boolean> | boolean;
@@ -59,7 +74,8 @@ export class SettingsOverlay {
     private currentArgs?: SettingsOverlayOpenArgs;
     private detachKeydown?: () => void;
     private selectedSpriteIndex = 0;
-    private promptValue = "";
+    private publicPersonaValue: CurrentUserPublicPersona = { additionalDescription: "" };
+    private aiHostingValue: CurrentUserAiHostingProfile = createEmptyAiHostingProfile();
     private busy = false;
     private environmentAvatarLoading = false;
     private environmentAvatarLoaded = false;
@@ -84,7 +100,13 @@ export class SettingsOverlay {
         this.language = args.initialLanguage;
         this.selectedLanguage = args.initialLanguage;
         this.selectedSpriteIndex = args.initialSpriteIndex;
-        this.promptValue = args.initialPrompt;
+        this.publicPersonaValue = {
+            additionalDescription: args.initialPublicPersona?.additionalDescription ?? ""
+        };
+        this.aiHostingValue = {
+            ...createEmptyAiHostingProfile(),
+            ...(args.initialAiHosting ?? {})
+        };
         this.environmentAvatarLoading = false;
         this.environmentAvatarLoaded = false;
         this.environmentAvatarError = null;
@@ -220,6 +242,16 @@ export class SettingsOverlay {
         };
         sidebar.addEventListener("wheel", stopWheelPropagation, { passive: true });
         content.addEventListener("wheel", stopWheelPropagation, { passive: true });
+
+        // Block keyboard events from reaching the game's Keyboard handler while
+        // the settings panel is open, so typing in text fields does not move the
+        // player character.
+        const stopKeyPropagation = (event: KeyboardEvent): void => {
+            event.stopPropagation();
+        };
+        panel.addEventListener("keydown", stopKeyPropagation);
+        panel.addEventListener("keyup", stopKeyPropagation);
+        panel.addEventListener("keypress", stopKeyPropagation);
 
         sidebar.appendChild(title);
         sidebar.appendChild(subtitle);
@@ -903,6 +935,111 @@ export class SettingsOverlay {
 
         actions.appendChild(saveButton);
         card.appendChild(grid);
+
+        const identitySection = document.createElement("div");
+        identitySection.style.display = "grid";
+        identitySection.style.gap = "12px";
+        identitySection.style.marginTop = "22px";
+        identitySection.style.padding = "18px";
+        identitySection.style.borderRadius = "16px";
+        identitySection.style.border = "1px solid rgba(164, 190, 255, 0.14)";
+        identitySection.style.background = "rgba(8, 12, 20, 0.28)";
+
+        const identityTitle = document.createElement("div");
+        identityTitle.textContent = this.t("settings.character.identityTitle");
+        identityTitle.style.font = `700 16px ${getUiFontStack(this.language)}`;
+        identitySection.appendChild(identityTitle);
+
+        const identityHelp = document.createElement("div");
+        identityHelp.textContent = this.t("settings.character.identityHelp");
+        identityHelp.style.color = "#cbd5f5";
+        identityHelp.style.lineHeight = "1.6";
+        identitySection.appendChild(identityHelp);
+
+        const identityGrid = document.createElement("div");
+        identityGrid.style.display = "grid";
+        identityGrid.style.gridTemplateColumns = "repeat(auto-fit, minmax(220px, 1fr))";
+        identityGrid.style.gap = "10px";
+
+        identityGrid.appendChild(this.createIdentityFactCard(
+            this.t("settings.character.identityName"),
+            this.currentArgs.currentUser?.displayName ?? this.t("status.unavailable")
+        ));
+        identityGrid.appendChild(this.createIdentityFactCard(
+            this.t("settings.character.identityOrganization"),
+            this.currentArgs.currentUser?.organization ?? this.t("status.defaultAffiliation")
+        ));
+        identityGrid.appendChild(this.createIdentityFactCard(
+            this.t("settings.character.identityDepartment"),
+            this.currentArgs.currentUser?.department ?? this.t("status.defaultAffiliation")
+        ));
+        identityGrid.appendChild(this.createIdentityFactCard(
+            this.t("settings.character.identityRoles"),
+            this.currentArgs.currentUser?.roles?.length ? this.currentArgs.currentUser.roles.join(", ") : this.t("status.defaultRole")
+        ));
+        identitySection.appendChild(identityGrid);
+
+        const descriptionLabel = document.createElement("label");
+        descriptionLabel.textContent = this.t("settings.character.additionalDescription");
+        descriptionLabel.style.font = `600 13px ${getUiFontStack(this.language)}`;
+        descriptionLabel.style.color = "#eef3ff";
+        identitySection.appendChild(descriptionLabel);
+
+        const descriptionArea = document.createElement("textarea");
+        descriptionArea.value = this.publicPersonaValue.additionalDescription ?? "";
+        descriptionArea.rows = 5;
+        descriptionArea.placeholder = this.t("settings.character.additionalDescriptionPlaceholder");
+        descriptionArea.style.width = "100%";
+        descriptionArea.style.boxSizing = "border-box";
+        descriptionArea.style.padding = "14px";
+        descriptionArea.style.borderRadius = "14px";
+        descriptionArea.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        descriptionArea.style.background = "rgba(8, 12, 20, 0.72)";
+        descriptionArea.style.color = "#eef3ff";
+        descriptionArea.style.font = `14px/1.6 ${getCodeFontStack(this.language)}`;
+        descriptionArea.style.resize = "vertical";
+        descriptionArea.oninput = () => {
+            this.publicPersonaValue = {
+                additionalDescription: descriptionArea.value
+            };
+        };
+        identitySection.appendChild(descriptionArea);
+
+        const identityActions = document.createElement("div");
+        identityActions.style.display = "flex";
+        identityActions.style.gap = "10px";
+        identityActions.style.flexWrap = "wrap";
+
+        const saveIdentityButton = this.createActionButton(this.t("settings.character.saveIdentity"), "rgba(72, 126, 255, 0.26)", "#eef3ff");
+        saveIdentityButton.onclick = async () => {
+            if (!this.currentArgs || this.busy) {
+                return;
+            }
+            this.busy = true;
+            this.updateDisabledState();
+            if (this.characterStatus) {
+                this.characterStatus.textContent = this.t("settings.character.savingIdentity");
+            }
+            try {
+                await this.currentArgs.onPublicPersonaSave({
+                    additionalDescription: (this.publicPersonaValue.additionalDescription ?? "").trim()
+                });
+                if (this.characterStatus) {
+                    this.characterStatus.textContent = this.t("settings.character.identitySaved");
+                }
+            } catch (error) {
+                if (this.characterStatus) {
+                    this.characterStatus.textContent = error instanceof Error ? error.message : this.t("settings.character.failedIdentity");
+                }
+            } finally {
+                this.busy = false;
+                this.updateDisabledState();
+            }
+        };
+        identityActions.appendChild(saveIdentityButton);
+        identitySection.appendChild(identityActions);
+
+        card.appendChild(identitySection);
         card.appendChild(status);
         card.appendChild(actions);
         this.content.appendChild(card);
@@ -921,23 +1058,113 @@ export class SettingsOverlay {
         intro.style.lineHeight = "1.6";
         card.appendChild(intro);
 
-        const textarea = document.createElement("textarea");
-        textarea.value = this.promptValue;
-        textarea.rows = 12;
-        textarea.placeholder = this.t("settings.prompt.placeholder");
-        textarea.style.width = "100%";
-        textarea.style.boxSizing = "border-box";
-        textarea.style.padding = "14px";
-        textarea.style.borderRadius = "14px";
-        textarea.style.border = "1px solid rgba(164, 190, 255, 0.2)";
-        textarea.style.background = "rgba(8, 12, 20, 0.72)";
-        textarea.style.color = "#eef3ff";
-        textarea.style.font = `14px/1.6 ${getCodeFontStack(this.language)}`;
-        textarea.style.resize = "vertical";
-        textarea.style.minHeight = "260px";
-        textarea.oninput = () => {
-            this.promptValue = textarea.value;
+        const enabledRow = document.createElement("label");
+        enabledRow.style.display = "flex";
+        enabledRow.style.alignItems = "flex-start";
+        enabledRow.style.gap = "12px";
+        enabledRow.style.marginBottom = "16px";
+        enabledRow.style.padding = "14px 16px";
+        enabledRow.style.borderRadius = "14px";
+        enabledRow.style.border = "1px solid rgba(164, 190, 255, 0.14)";
+        enabledRow.style.background = "rgba(255, 255, 255, 0.04)";
+
+        const enabledCheckbox = document.createElement("input");
+        enabledCheckbox.type = "checkbox";
+        enabledCheckbox.checked = this.aiHostingValue.enabled !== false;
+        enabledCheckbox.style.marginTop = "2px";
+        enabledCheckbox.onchange = () => {
+            this.aiHostingValue = {
+                ...this.aiHostingValue,
+                enabled: enabledCheckbox.checked
+            };
         };
+
+        const enabledText = document.createElement("div");
+        enabledText.style.display = "grid";
+        enabledText.style.gap = "4px";
+
+        const enabledTitle = document.createElement("div");
+        enabledTitle.textContent = this.t("settings.prompt.enabled");
+        enabledTitle.style.font = `600 14px ${getUiFontStack(this.language)}`;
+        enabledTitle.style.color = "#eef3ff";
+
+        const enabledHelp = document.createElement("div");
+        enabledHelp.textContent = this.t("settings.prompt.enabledHelp");
+        enabledHelp.style.color = "#cbd5f5";
+        enabledHelp.style.lineHeight = "1.5";
+
+        enabledText.appendChild(enabledTitle);
+        enabledText.appendChild(enabledHelp);
+        enabledRow.appendChild(enabledCheckbox);
+        enabledRow.appendChild(enabledText);
+        card.appendChild(enabledRow);
+
+        card.appendChild(this.createAiHostingField(
+            this.t("settings.prompt.coreIdentity"),
+            this.t("settings.prompt.coreIdentityPlaceholder"),
+            this.aiHostingValue.coreIdentity ?? "",
+            value => {
+                this.aiHostingValue = {
+                    ...this.aiHostingValue,
+                    coreIdentity: value
+                };
+            }
+        ));
+        card.appendChild(this.createAiHostingField(
+            this.t("settings.prompt.speakingStyle"),
+            this.t("settings.prompt.speakingStylePlaceholder"),
+            this.aiHostingValue.speakingStyle ?? "",
+            value => {
+                this.aiHostingValue = {
+                    ...this.aiHostingValue,
+                    speakingStyle: value
+                };
+            }
+        ));
+        card.appendChild(this.createAiHostingField(
+            this.t("settings.prompt.interactionGoals"),
+            this.t("settings.prompt.interactionGoalsPlaceholder"),
+            this.aiHostingValue.interactionGoals ?? "",
+            value => {
+                this.aiHostingValue = {
+                    ...this.aiHostingValue,
+                    interactionGoals: value
+                };
+            }
+        ));
+        card.appendChild(this.createAiHostingField(
+            this.t("settings.prompt.relationshipGuidance"),
+            this.t("settings.prompt.relationshipGuidancePlaceholder"),
+            this.aiHostingValue.relationshipGuidance ?? "",
+            value => {
+                this.aiHostingValue = {
+                    ...this.aiHostingValue,
+                    relationshipGuidance: value
+                };
+            }
+        ));
+        card.appendChild(this.createAiHostingField(
+            this.t("settings.prompt.boundaries"),
+            this.t("settings.prompt.boundariesPlaceholder"),
+            this.aiHostingValue.boundaries ?? "",
+            value => {
+                this.aiHostingValue = {
+                    ...this.aiHostingValue,
+                    boundaries: value
+                };
+            }
+        ));
+        card.appendChild(this.createAiHostingField(
+            this.t("settings.prompt.additionalInstructions"),
+            this.t("settings.prompt.additionalInstructionsPlaceholder"),
+            this.aiHostingValue.additionalInstructions ?? "",
+            value => {
+                this.aiHostingValue = {
+                    ...this.aiHostingValue,
+                    additionalInstructions: value
+                };
+            }
+        ));
 
         const status = document.createElement("div");
         status.style.minHeight = "22px";
@@ -954,25 +1181,32 @@ export class SettingsOverlay {
 
         const clearButton = this.createActionButton(this.t("settings.prompt.clear"), "rgba(255, 194, 111, 0.12)", "#ffe1b1");
         clearButton.onclick = async () => {
-            textarea.value = "";
-            this.promptValue = "";
-            await this.savePromptValue("");
+            this.aiHostingValue = createEmptyAiHostingProfile();
+            this.renderContent();
+            await this.savePromptValue(createEmptyAiHostingProfile());
         };
 
         const saveButton = this.createActionButton(this.t("settings.prompt.save"), "rgba(72, 126, 255, 0.26)", "#eef3ff");
         saveButton.onclick = async () => {
-            await this.savePromptValue(textarea.value.trim());
+            await this.savePromptValue({
+                enabled: this.aiHostingValue.enabled !== false,
+                coreIdentity: (this.aiHostingValue.coreIdentity ?? "").trim(),
+                speakingStyle: (this.aiHostingValue.speakingStyle ?? "").trim(),
+                interactionGoals: (this.aiHostingValue.interactionGoals ?? "").trim(),
+                relationshipGuidance: (this.aiHostingValue.relationshipGuidance ?? "").trim(),
+                boundaries: (this.aiHostingValue.boundaries ?? "").trim(),
+                additionalInstructions: (this.aiHostingValue.additionalInstructions ?? "").trim()
+            });
         };
 
         actions.appendChild(clearButton);
         actions.appendChild(saveButton);
-        card.appendChild(textarea);
         card.appendChild(status);
         card.appendChild(actions);
         this.content.appendChild(card);
     }
 
-    private async savePromptValue(prompt: string): Promise<void> {
+    private async savePromptValue(aiHosting: CurrentUserAiHostingProfile): Promise<void> {
         if (!this.currentArgs || this.busy) {
             return;
         }
@@ -982,10 +1216,21 @@ export class SettingsOverlay {
             this.promptStatus.textContent = this.t("settings.prompt.saving");
         }
         try {
-            await this.currentArgs.onPromptSave(prompt);
-            this.promptValue = prompt;
+            await this.currentArgs.onAiHostingSave(aiHosting);
+            this.aiHostingValue = {
+                ...createEmptyAiHostingProfile(),
+                ...aiHosting
+            };
+            const hasConfiguredFields = [
+                aiHosting.coreIdentity,
+                aiHosting.speakingStyle,
+                aiHosting.interactionGoals,
+                aiHosting.relationshipGuidance,
+                aiHosting.boundaries,
+                aiHosting.additionalInstructions
+            ].some(value => (value ?? "").length > 0);
             if (this.promptStatus) {
-                this.promptStatus.textContent = prompt.length > 0 ? this.t("settings.prompt.saved") : this.t("settings.prompt.cleared");
+                this.promptStatus.textContent = hasConfiguredFields ? this.t("settings.prompt.saved") : this.t("settings.prompt.cleared");
             }
         } catch (error) {
             if (this.promptStatus) {
@@ -995,6 +1240,63 @@ export class SettingsOverlay {
             this.busy = false;
             this.updateDisabledState();
         }
+    }
+
+    private createIdentityFactCard(label: string, value: string): HTMLDivElement {
+        const wrapper = document.createElement("div");
+        wrapper.style.padding = "12px 14px";
+        wrapper.style.borderRadius = "14px";
+        wrapper.style.border = "1px solid rgba(164, 190, 255, 0.12)";
+        wrapper.style.background = "rgba(255, 255, 255, 0.04)";
+
+        const title = document.createElement("div");
+        title.textContent = label;
+        title.style.font = `600 12px ${getUiFontStack(this.language)}`;
+        title.style.color = "#9fb0d8";
+        title.style.marginBottom = "6px";
+
+        const content = document.createElement("div");
+        content.textContent = value;
+        content.style.color = "#eef3ff";
+        content.style.lineHeight = "1.5";
+        content.style.wordBreak = "break-word";
+
+        wrapper.appendChild(title);
+        wrapper.appendChild(content);
+        return wrapper;
+    }
+
+    private createAiHostingField(label: string, placeholder: string, value: string, onInput: (value: string) => void): HTMLDivElement {
+        const wrapper = document.createElement("div");
+        wrapper.style.display = "grid";
+        wrapper.style.gap = "8px";
+        wrapper.style.marginBottom = "14px";
+
+        const title = document.createElement("label");
+        title.textContent = label;
+        title.style.font = `600 13px ${getUiFontStack(this.language)}`;
+        title.style.color = "#eef3ff";
+
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.rows = 4;
+        textarea.placeholder = placeholder;
+        textarea.style.width = "100%";
+        textarea.style.boxSizing = "border-box";
+        textarea.style.padding = "14px";
+        textarea.style.borderRadius = "14px";
+        textarea.style.border = "1px solid rgba(164, 190, 255, 0.2)";
+        textarea.style.background = "rgba(8, 12, 20, 0.72)";
+        textarea.style.color = "#eef3ff";
+        textarea.style.font = `14px/1.6 ${getCodeFontStack(this.language)}`;
+        textarea.style.resize = "vertical";
+        textarea.oninput = () => {
+            onInput(textarea.value);
+        };
+
+        wrapper.appendChild(title);
+        wrapper.appendChild(textarea);
+        return wrapper;
     }
 
     private renderEnvironmentAvatarTab(): void {
@@ -1327,6 +1629,35 @@ export class SettingsOverlay {
         const actions = document.createElement("div");
         actions.style.display = "flex";
         actions.style.justifyContent = "flex-end";
+        actions.style.gap = "8px";
+
+        const deleteButton = this.createActionButton(this.t("settings.environment.delete"), "rgba(255, 72, 72, 0.22)", "#ffe0e0");
+        deleteButton.onclick = async () => {
+            if (!this.currentArgs?.onEnvironmentAvatarDelete || this.busy) {
+                return;
+            }
+            const confirmMessage = this.t("settings.environment.deleteConfirm", { name: avatar.displayName });
+            if (!window.confirm(confirmMessage)) {
+                return;
+            }
+            this.busy = true;
+            this.environmentAvatarStatuses.set(avatar.agentId, this.t("settings.environment.deleting"));
+            this.renderContent();
+            try {
+                await this.currentArgs.onEnvironmentAvatarDelete(avatar.agentId);
+                this.environmentAvatarDrafts = this.environmentAvatarDrafts.filter(entry => entry.agentId !== avatar.agentId);
+                this.environmentAvatarStatuses.delete(avatar.agentId);
+                this.selectedEnvironmentAvatarId = this.environmentAvatarDrafts.length > 0
+                    ? this.environmentAvatarDrafts[0].agentId
+                    : null;
+                this.environmentAvatarToolbarStatus = this.t("settings.environment.deleted");
+            } catch (error) {
+                this.environmentAvatarStatuses.set(avatar.agentId, error instanceof Error ? error.message : this.t("settings.environment.failedDelete"));
+            } finally {
+                this.busy = false;
+                this.renderContent();
+            }
+        };
 
         const saveButton = this.createActionButton(this.t("settings.environment.save"), "rgba(72, 126, 255, 0.26)", "#eef3ff");
         saveButton.onclick = async () => {
@@ -1356,6 +1687,7 @@ export class SettingsOverlay {
             }
         };
 
+        actions.appendChild(deleteButton);
         actions.appendChild(saveButton);
         wrapper.appendChild(actions);
         return wrapper;
@@ -1782,7 +2114,7 @@ export class SettingsOverlay {
             case "environment-avatars":
                 return this.t("settings.tab.environment");
             default:
-                return this.t("settings.tab.aiPrompt");
+                return this.t("settings.tab.aiHosting");
         }
     }
 
@@ -1797,7 +2129,7 @@ export class SettingsOverlay {
             case "environment-avatars":
                 return this.t("settings.description.environment");
             default:
-                return this.t("settings.description.aiPrompt");
+                return this.t("settings.description.aiHosting");
         }
     }
 

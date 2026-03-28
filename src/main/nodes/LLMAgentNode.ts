@@ -36,6 +36,7 @@ export class LLMAgentNode extends NpcNode {
 
     private readonly agentId: string;
     private readonly displayName: string;
+    private readonly spriteIndex: number;
     private readonly defaultSystemPrompt?: string;
     private currentSystemPrompt?: string;
     private readonly defaultCaption: string;
@@ -56,6 +57,7 @@ export class LLMAgentNode extends NpcNode {
         super(args);
         this.agentId = args.agentId;
         this.displayName = args.displayName ?? args.id ?? args.agentId;
+        this.spriteIndex = args.spriteIndex ?? 0;
         this.defaultSystemPrompt = args.systemPrompt;
         this.currentSystemPrompt = args.systemPrompt;
         this.defaultCaption = args.caption ?? "按E键进行互动";
@@ -628,6 +630,10 @@ export class LLMAgentNode extends NpcNode {
 
     public getDisplayName(): string {
         return this.displayName;
+    }
+
+    public getSpriteIndex(): number {
+        return this.spriteIndex;
     }
 
     public getSystemPrompt(): string {

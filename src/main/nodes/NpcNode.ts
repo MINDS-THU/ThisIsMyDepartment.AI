@@ -22,8 +22,8 @@ export class NpcNode extends CharacterNode {
     @asset(STANDARD_FONT)
     private static readonly font: BitmapFont;
     @asset([
-        "sprites/characters/dark_staff_black.aseprite.json",
         "sprites/characters/character.aseprite.json",
+        "sprites/characters/dark_staff_black.aseprite.json",
         "sprites/characters/HalloweenGhost.aseprite.json",
         "sprites/characters/dark_casualjacket_orange_white.aseprite.json",
         "sprites/characters/light_male_pkmn_red.aseprite.json",

@@ -1,284 +1,205 @@
-# ThisIsMyDepartment.AI Hosting Guide
+# Hosting Guide
 
-This document explains the current deployment shape of the repository and the minimum pieces needed to host it for a department or organization.
+This guide covers deploying ThisIsMyDepartment.AI for a department, lab, or organization. For local development, start with [getting-started.md](getting-started.md) instead.
 
-If you have not run the project locally yet, start with [doc/getting-started.md](doc/getting-started.md) first. If you want a summary of what is already implemented versus still incomplete, read [doc/current-status.md](doc/current-status.md).
+## Deployment Architecture
 
-Configuration templates live in [.env.example](.env.example), [server/.env.local.example](server/.env.local.example), and [server/.env.production.example](server/.env.production.example).
+```text
+                    +-----------------------+
+ Browser  -------> |    Reverse Proxy       |   (Nginx, Caddy, etc.)
+                    |  - TLS termination    |
+                    |  - Static assets      |
+                    |  - Auth header inject  |
+                    +-----------+-----------+
+                                |
+                    +-----------v-----------+
+                    |      Backend          |   (Node.js, port 8787)
+                    |  - Auth / sessions    |
+                    |  - Profile storage    |
+                    |  - AI chat routing    |
+                    |  - Socket.IO server   |
+                    |  - SQLite persistence |
+                    +-----------------------+
+```
 
-## Deployment shape
+Recommended approach: serve the frontend assets and proxy all backend traffic through a single domain. This avoids cross-origin cookie and redirect issues.
 
-The current app is split into two parts:
-
-1. frontend client
-2. backend service
-
-The frontend renders the world and talks to the backend for:
-
-* bootstrap and session resolution
-* profile and avatar persistence
-* activity logging
-* AI agent chat
-* prompt overrides
-
-## Minimum local setup
+## Build for Production
 
 ### Frontend
 
-Use the root package:
-
-```bash
+```sh
 npm install
 npm run compile
-npm start
+npm run dist
 ```
 
-Notes:
+The `dist/` folder contains the bundled frontend assets ready to be served by a web server.
 
-* the legacy frontend stack in this repository is tied to older Node tooling
-* the root package still carries a Node `16.20.2` Volta pin for the legacy frontend toolchain
-* the root `npm install` now also installs backend dependencies under `server/`
+When building for production, set the frontend environment variables in `.env` before running `npm run dist`:
 
-### Backend
-
-Use the backend package through the root scripts:
-
-```bash
-npm run server:install
-npm run server:build
-npm run server:start
-```
-
-Default backend address:
-
-```text
-http://127.0.0.1:8787
-```
-
-Default persisted database path:
-
-```text
-server/data/state.sqlite
-```
-
-If `better-sqlite3` needs a native rebuild on macOS under Node 16, ensure `python` is available in `PATH`. Systems that only provide `python3` may need a temporary `python` shim for the rebuild step.
-
-Operational note:
-
-* the backend dependency `better-sqlite3@12.x` advertises newer Node engines than the legacy frontend stack
-* for production and CI, treat backend runtime selection as an explicit deployment decision rather than assuming the root frontend Node pin is the correct backend runtime too
-
-## Important environment variables
-
-### General backend
-
-* `HOST`
-* `PORT`
-* `AUTH_SESSION_COOKIE_NAME`
-* `AUTH_SESSION_TTL_SECONDS`
-* `SERVER_STATE_DB_FILE`
-
-### Frontend realtime
-
-Browser builds can inject realtime host settings into the generated `index.html` through these environment variables:
-
-* `TIMD_BACKEND_BASE_URL`
-* `TIMD_SOCKET_BASE_URL`
-* `TIMD_JITSI_DOMAIN`
-* `TIMD_JITSI_MUC`
-* `TIMD_JITSI_SERVICE_URL`
-* `TIMD_JITSI_CLIENT_NODE`
-
-The frontend webpack config reads these from the root `.env` file, so the usual workflow is to copy [.env.example](.env.example) to `.env` and adjust it per deployment.
-
-If you do not set them, the frontend falls back to same-host defaults:
-
-* backend API at the current origin, with `http://127.0.0.1:8787` as a local development fallback
-* socket.io at the same origin as the backend, with `http://127.0.0.1:8787/` as the local development fallback when the frontend runs on port `8000`
-* Jitsi domain `<current-host>`
-* Jitsi MUC `conference.<current-host>`
-* Jitsi BOSH path `http(s)://<current-host>/http-bind`
-* Jitsi client node `http(s)://<current-host>/jitsimeet`
-
-Important note:
-
-* this repository now includes the authoritative Socket.IO room server implementation inside the backend package
-* the remaining production `npm audit` findings in the root package are concentrated in the legacy `socket.io-client` dependency line
-* a safe client upgrade still requires coordinated validation against the deployed realtime server protocol, not just package changes in the browser client
-
-### Backend deployment defaults
-
-The backend also exposes deployment defaults for local auth redirects and room metadata:
-
-* `TIMD_FRONTEND_BASE_URL`
-* `TIMD_DEFAULT_ORGANIZATION`
-* `TIMD_DEFAULT_DEPARTMENT`
-* `TIMD_DEFAULT_ROOM_ID`
-* `TIMD_DEFAULT_ROOM_DISPLAY_NAME`
-
-### Auth integration
-
-See [doc/auth-integration.md](doc/auth-integration.md) for full examples.
-
-Current auth-related variables include:
-
-* `AUTH_HANDOFF_SHARED_SECRET`
-* `AUTH_JWT_SHARED_SECRET`
-* `AUTH_JWT_ISSUER`
-* `AUTH_JWT_AUDIENCE`
-* `AUTH_PROXY_PROVIDER`
-* `AUTH_PROXY_EXTERNAL_ID_HEADER`
-* `AUTH_PROXY_DISPLAY_NAME_HEADER`
-* `AUTH_PROXY_EMAIL_HEADER`
-* `AUTH_PROXY_ORGANIZATION_HEADER`
-* `AUTH_PROXY_DEPARTMENT_HEADER`
-* `AUTH_PROXY_ROLES_HEADER`
-* `AUTH_PROXY_AUTHENTICATED_HEADER`
-* `AUTH_PROXY_AUTHENTICATED_VALUE`
-* `AUTH_POSTMESSAGE_ALLOWED_ORIGINS`
-
-Use [server/.env.production.example](server/.env.production.example) as the baseline for production deployment. The backend now loads `server/.env.production` automatically when `NODE_ENV=production`, and `SERVER_ENV_FILE` can point to a different env file when a deployment wants explicit control. Shell-provided environment variables still override file values, so service managers and container platforms remain valid deployment paths.
-
-### LLM provider routing
-
-Currently implemented:
-
-* `TIMD_AGENT_LLM_PROVIDER`
-* `OPENROUTER_API_KEY`
-* `OPENROUTER_MODEL`
-* `OPENAI_API_KEY`
-* `OPENAI_MODEL`
-
-If neither provider key is set, the backend falls back to the mock provider path.
-
-Example production environment:
-
-```bash
-HOST=127.0.0.1
-PORT=8787
-AUTH_SESSION_COOKIE_NAME=timd_session
-AUTH_SESSION_TTL_SECONDS=28800
-SERVER_STATE_DB_FILE=/var/lib/thisismydepartment/state.sqlite
-OPENAI_API_KEY=sk-...
-AUTH_PROXY_PROVIDER=campus-sso
-AUTH_PROXY_EXTERNAL_ID_HEADER=x-user-id
-AUTH_PROXY_DISPLAY_NAME_HEADER=x-display-name
-AUTH_PROXY_EMAIL_HEADER=x-user-email
-AUTH_PROXY_AUTHENTICATED_HEADER=x-authenticated
-AUTH_PROXY_AUTHENTICATED_VALUE=true
-AUTH_POSTMESSAGE_ALLOWED_ORIGINS=https://portal.example.edu
-TIMD_FRONTEND_BASE_URL=https://department.example.edu/
-TIMD_DEFAULT_ORGANIZATION=Example University
-TIMD_DEFAULT_DEPARTMENT=Industrial Engineering
-TIMD_DEFAULT_ROOM_ID=industrial-engineering-main
-TIMD_DEFAULT_ROOM_DISPLAY_NAME=Industrial Engineering Department
+```sh
 TIMD_BACKEND_BASE_URL=https://department.example.edu
-TIMD_SOCKET_BASE_URL=https://realtime.example.edu/
+TIMD_SOCKET_BASE_URL=https://department.example.edu/
 TIMD_JITSI_DOMAIN=meet.example.edu
 TIMD_JITSI_MUC=conference.meet.example.edu
 TIMD_JITSI_SERVICE_URL=https://meet.example.edu/http-bind
 TIMD_JITSI_CLIENT_NODE=https://meet.example.edu/jitsimeet
 ```
 
-## Browser-hosted deployment
+If the frontend and backend are on the same domain (recommended), the backend URL variables can be left unset -- the frontend defaults to the current origin. Jitsi variables always need to be set explicitly (see [Jitsi Integration](#jitsi-integration) below).
 
-Recommended shape:
+### Backend
 
-1. host the frontend assets on the same origin as the backend when possible
-2. expose the backend under the same domain so cookie sessions behave predictably
-3. put upstream auth in front of the backend using one of the supported auth adapter modes
-4. route both HTTP and Socket.IO traffic to the same backend service unless you intentionally split them for scaling
+```sh
+npm run server:build
+```
 
-Recommended examples:
+The compiled backend lives in `server/dist/`. Run it with:
 
-* `https://department.example.edu/` serves frontend assets
-* `https://department.example.edu/api/*` and `https://department.example.edu/auth/*` are routed to the backend
+```sh
+NODE_ENV=production node server/dist/server/src/app.js
+```
 
-This keeps bootstrap, cookies, and post-login redirects simpler than split-origin hosting.
+Or use the wrapper script:
 
-### Example Nginx layout
+```sh
+NODE_ENV=production npm run server:start
+```
+
+## Backend Configuration
+
+Copy the production template:
+
+```sh
+cp server/.env.production.example server/.env.production
+```
+
+The backend loads `server/.env.production` automatically when `NODE_ENV=production`.
+
+### Example production environment
+
+```sh
+HOST=127.0.0.1
+PORT=8787
+TIMD_FRONTEND_BASE_URL=https://department.example.edu/
+SERVER_STATE_DB_FILE=/var/lib/thisismydepartment/state.sqlite
+
+AUTH_SESSION_COOKIE_NAME=timd_session
+AUTH_SESSION_TTL_SECONDS=28800
+AUTH_ALLOW_INSECURE_DEV_HANDOFF=false
+
+TIMD_DEFAULT_ORGANIZATION=Example University
+TIMD_DEFAULT_DEPARTMENT=Industrial Engineering
+TIMD_DEFAULT_ROOM_ID=industrial-engineering-main
+TIMD_DEFAULT_ROOM_DISPLAY_NAME=Industrial Engineering Department
+
+# Auth -- pick one mode (see doc/auth-integration.md)
+AUTH_PROXY_PROVIDER=campus-sso
+AUTH_PROXY_EXTERNAL_ID_HEADER=x-user-id
+AUTH_PROXY_DISPLAY_NAME_HEADER=x-display-name
+AUTH_PROXY_EMAIL_HEADER=x-user-email
+AUTH_PROXY_AUTHENTICATED_HEADER=x-authenticated
+AUTH_PROXY_AUTHENTICATED_VALUE=true
+
+# LLM provider
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+Shell environment variables override file values, so container platforms and service managers work as expected.
+
+### Key variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HOST` | Bind address | `127.0.0.1` |
+| `PORT` | Listen port | `8787` |
+| `TIMD_FRONTEND_BASE_URL` | Where to redirect after login | `http://127.0.0.1:8000/` |
+| `SERVER_STATE_DB_FILE` | SQLite database path | `data/state.sqlite` |
+| `AUTH_ALLOW_INSECURE_DEV_HANDOFF` | Allow unsigned login form | `true` (**set to `false` in production**) |
+| `AUTH_SESSION_TTL_SECONDS` | Session cookie lifetime | `28800` (8 hours) |
+
+See [server/.env.production.example](../server/.env.production.example) for the full list.
+
+## Nginx Configuration
+
+### Single-domain setup (recommended)
+
+Serve frontend assets and proxy backend traffic through the same domain:
 
 ```nginx
 server {
     listen 443 ssl http2;
     server_name department.example.edu;
 
-    root /srv/thisismydepartment/frontend/dist;
+    ssl_certificate     /etc/ssl/certs/department.example.edu.pem;
+    ssl_certificate_key /etc/ssl/private/department.example.edu.key;
+
+    # Frontend static assets
+    root /srv/thisismydepartment/dist;
     index index.html;
 
     location / {
         try_files $uri $uri/ /index.html;
     }
 
+    # Backend API
     location /api/ {
         proxy_pass http://127.0.0.1:8787;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
+    # Auth endpoints
     location /auth/ {
         proxy_pass http://127.0.0.1:8787;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Socket.IO (real-time multiplayer)
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Health check
+    location = /health {
+        proxy_pass http://127.0.0.1:8787;
     }
 }
 ```
 
-## Electron-hosted deployment
+### Reverse-proxy auth headers
 
-The repo still includes Electron entry points for packaging.
-
-Current state:
-
-* Electron window title and app name now use ThisIsMyDepartment.AI
-* the backend still runs as a separate service process in the current implementation
-
-Recommended near-term deployment model:
-
-1. package the frontend Electron shell if desktop distribution is needed
-2. point it at a hosted backend or a locally managed backend process
-3. keep auth and provider secrets on the backend only
-
-## Persistence
-
-Current backend persistence uses SQLite via:
-
-* [server/src/storage/stateStore.ts](server/src/storage/stateStore.ts)
-
-Persisted entities currently include:
-
-* users
-* profiles
-* sessions
-* activities
-* conversations
-* external identity index
-
-Legacy JSON state from `server/data/state.json` is imported automatically the first time an empty SQLite database starts.
-
-## Reverse proxy recommendations
-
-For production hosting, use a reverse proxy in front of the backend to handle:
-
-* TLS termination
-* upstream auth integration
-* header filtering and forwarding
-* static frontend asset delivery
-
-If you use the reverse-proxy auth mode, be strict about which headers are injected by the proxy and never trust those headers directly from the public internet.
-
-### Example reverse-proxy auth headers
+If using the reverse-proxy auth mode, inject identity headers from your SSO gateway:
 
 ```nginx
 location = /auth/proxy-login {
     proxy_pass http://127.0.0.1:8787;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # Strip client-supplied headers to prevent spoofing
+    proxy_set_header x-authenticated "";
+    proxy_set_header x-user-id "";
+    proxy_set_header x-display-name "";
+
+    # Inject values from your SSO layer
     proxy_set_header x-authenticated true;
     proxy_set_header x-user-id $upstream_http_x_user_id;
     proxy_set_header x-display-name $upstream_http_x_display_name;
@@ -286,7 +207,92 @@ location = /auth/proxy-login {
 }
 ```
 
-In a real deployment, replace those variables with values emitted by your SSO gateway or authentication layer, and strip any same-named headers coming from direct client traffic.
+Replace the `$upstream_http_*` variables with values from your actual SSO gateway. See [auth-integration.md](auth-integration.md) for all supported auth modes.
+
+## Persistence and Backups
+
+Backend state is stored in a single SQLite file:
+
+```text
+server/data/state.sqlite    (default)
+/var/lib/thisismydepartment/state.sqlite    (production example)
+```
+
+To back up the database, copy the file while the backend is idle or use SQLite's `.backup` command:
+
+```sh
+sqlite3 /var/lib/thisismydepartment/state.sqlite ".backup /backups/state-$(date +%Y%m%d).sqlite"
+```
+
+Persisted data includes: users, profiles, sessions, activities, conversations, and external identity mappings.
+
+Legacy JSON state from `server/data/state.json` is imported automatically the first time an empty SQLite database starts.
+
+## Jitsi Integration
+
+Proximity-based voice/video chat and screensharing require a [Jitsi Meet](https://jitsi.org/jitsi-meet/) server. Without Jitsi, users can still navigate the environment, text chat, and talk to AI characters, but they will not have audio or video when walking near other users.
+
+### Getting a Jitsi server
+
+You have three options:
+
+1. **Public instance** -- Use `meet.jit.si` (free, no setup). Suitable for testing but not recommended for production due to privacy and reliability.
+2. **Self-hosted** -- Deploy Jitsi Meet on your own infrastructure. See the [Jitsi self-hosting guide](https://jitsi.github.io/handbook/docs/devops-guide/devops-guide-quickstart).
+3. **Same-domain** -- If you run Jitsi on the same domain as the app, the frontend falls back to same-host paths (`/http-bind`, etc.) and no explicit configuration is needed.
+
+### Frontend configuration
+
+On localhost, Jitsi is disabled by default to avoid `/http-bind` errors when no Jitsi server is running. For production deployments, set these variables in the frontend `.env` before running `npm run dist`:
+
+| Variable | Example |
+|----------|---------|
+| `TIMD_JITSI_DOMAIN` | `meet.example.edu` |
+| `TIMD_JITSI_MUC` | `conference.meet.example.edu` |
+| `TIMD_JITSI_SERVICE_URL` | `https://meet.example.edu/http-bind` |
+| `TIMD_JITSI_CLIENT_NODE` | `https://meet.example.edu/jitsimeet` |
+
+For a public Jitsi instance, use:
+
+```sh
+TIMD_JITSI_DOMAIN=meet.jit.si
+TIMD_JITSI_MUC=conference.meet.jit.si
+TIMD_JITSI_SERVICE_URL=https://meet.jit.si/http-bind
+TIMD_JITSI_CLIENT_NODE=https://meet.jit.si/jitsimeet
+```
+
+> **Note:** Without these variables set on a non-localhost deployment, video/voice will silently fail unless Jitsi is running on the same domain.
+
+## Electron Desktop App
+
+The repo includes Electron Forge configuration for packaging as a desktop application:
+
+```sh
+npm run dist        # build frontend bundle
+npm run package     # create Electron app
+npm run make        # create distributable
+```
+
+The Electron app still connects to a remote backend. Keep auth and LLM credentials on the server side.
+
+## Security Checklist
+
+Before exposing the app to users:
+
+- [ ] Set `AUTH_ALLOW_INSECURE_DEV_HANDOFF=false`
+- [ ] Configure a real auth mode (shared-secret, JWT, reverse-proxy, or postMessage)
+- [ ] Terminate TLS at the reverse proxy
+- [ ] Keep LLM API keys on the backend only
+- [ ] Set `AUTH_POSTMESSAGE_ALLOWED_ORIGINS` explicitly if using the embedded auth bridge
+- [ ] Strip auth-sensitive request headers from direct client traffic in the reverse proxy
+- [ ] Use `Secure` and `HttpOnly` cookie attributes (default for `SameSite=Lax`)
+- [ ] Rotate shared secrets and JWT signing keys periodically
+
+## Current Limitations
+
+- Socket.IO uses the legacy v2 protocol; upgrading requires coordinated client and server changes
+- The backend is single-process with SQLite -- suitable for small-to-medium deployments but not horizontally scalable
+- No built-in health monitoring or metrics endpoint beyond `/health`
+- Frontend toolchain requires Node 16 for building; backend requires Node 20+ at runtime
 
 ## Embedded auth example
 
@@ -319,10 +325,4 @@ Example parent page flow for the `postMessage` bridge:
 </script>
 ```
 
-## Current limitations
-
-These areas still need more release polish:
-
-* runtime guidance is still more complex than it should be because the frontend and backend do not yet share a clean single Node baseline
-* provider configuration docs should continue to improve around OpenRouter and multi-provider operations
-* public deployment validation should cover both cookie-based auth flows and websocket traffic behind a reverse proxy
+See [auth-integration.md](auth-integration.md) for all supported auth modes and the full postMessage protocol.

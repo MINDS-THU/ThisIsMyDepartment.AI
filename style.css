@@ -3,10 +3,10 @@
     --timd-ui-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
     --timd-code-font: 'SFMono-Regular', 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
     --timd-sidebar-top: 16px;
-    --timd-sidebar-left: 16px;
+    --timd-sidebar-left: 0px;
     --timd-sidebar-gap: 12px;
     --timd-sidebar-bottom-gap: 16px;
-    --timd-sidebar-collapsed-width: 30px;
+    --timd-sidebar-collapsed-width: 22px;
     --timd-character-status-height: 316px;
 }
 
@@ -306,42 +306,70 @@ button {
 }
 
 .timd-character-status {
+    display: grid;
+    grid-template-columns: minmax(0, var(--timd-panel-width)) var(--timd-sidebar-collapsed-width);
+    align-items: stretch;
+    overflow: hidden;
     transition: transform 180ms ease;
     transform: translateX(0);
     transform-origin: left center;
 }
 
 .timd-character-status--collapsed {
-    transform: translateX(calc(-100% + var(--timd-sidebar-collapsed-width)));
+    transform: translateX(calc(-1 * var(--timd-panel-width) - 1px));
 }
 
 .timd-character-status__panel,
 .timd-scene-navigator__panel {
     position: relative;
+    min-width: 0;
+    overflow: hidden;
 }
 
-.timd-sidebar-toggle {
-    position: absolute;
-    top: 8px;
-    right: 4px;
+.timd-sidebar-rail {
+    position: relative;
     z-index: 3;
-    width: 22px;
-    height: 22px;
-    display: inline-flex;
+    width: var(--timd-sidebar-collapsed-width);
+    min-width: var(--timd-sidebar-collapsed-width);
+    align-self: stretch;
+    display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgba(164, 190, 255, 0.26);
-    background: linear-gradient(180deg, rgba(44, 63, 102, 0.96), rgba(20, 31, 54, 0.96));
+    border: 1px solid #4f628c;
+    border-left: 0;
+    border-radius: 0 16px 16px 0;
+    background:
+        repeating-linear-gradient(
+            135deg,
+            #7d87a6 0 5px,
+            #2b3751 5px 10px
+        ),
+        linear-gradient(180deg, #22304b, #101827);
     color: #eef3ff;
     font-family: inherit;
-    font-size: 14px;
+    font-size: 16px;
+    font-weight: 700;
     line-height: 1;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    text-shadow: 0 0 12px rgba(139, 190, 255, 0.28);
+    box-shadow:
+        inset 1px 0 0 rgba(255, 255, 255, 0.08),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        0 18px 44px rgba(0, 0, 0, 0.24);
+    transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
 }
 
-.timd-character-status .timd-sidebar-toggle {
-    top: 8px;
-    right: 4px;
+.timd-sidebar-rail:hover {
+    background:
+        repeating-linear-gradient(
+            135deg,
+            #95a6cc 0 5px,
+            #374a6f 5px 10px
+        ),
+        linear-gradient(180deg, #314468, #16223a);
+    box-shadow:
+        inset 1px 0 0 rgba(255, 255, 255, 0.12),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 22px 52px rgba(0, 0, 0, 0.32);
 }
 
 .timd-scene-navigator {
@@ -349,20 +377,22 @@ button {
     top: calc(var(--timd-sidebar-top) + var(--timd-character-status-height) + var(--timd-sidebar-gap));
     bottom: var(--timd-sidebar-bottom-gap);
     left: var(--timd-sidebar-left);
-    width: min(312px, calc(100vw - 32px));
+    width: calc(var(--timd-panel-width) + var(--timd-sidebar-collapsed-width));
     z-index: 9996;
     pointer-events: auto;
     color: #eef3ff;
     font-family: var(--timd-ui-font);
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, var(--timd-panel-width)) var(--timd-sidebar-collapsed-width);
+    align-items: stretch;
+    overflow: hidden;
     transition: transform 180ms ease;
     transform: translateX(0);
     transform-origin: left center;
 }
 
 .timd-scene-navigator.timd-scene-navigator--collapsed {
-    transform: translateX(calc(-100% + var(--timd-sidebar-collapsed-width)));
+    transform: translateX(calc(-1 * var(--timd-panel-width) - 1px));
 }
 
 .timd-scene-navigator__panel {
@@ -374,7 +404,6 @@ button {
     border: 1px solid rgba(164, 190, 255, 0.24);
     background: linear-gradient(160deg, rgba(22, 29, 44, 0.96), rgba(11, 16, 26, 0.96));
     box-shadow: 0 22px 56px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    clip-path: polygon(0 10px, 10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px));
     overflow: hidden;
 }
 
@@ -576,9 +605,9 @@ button {
     .timd-scene-navigator {
         top: auto;
         bottom: 16px;
-        left: 16px;
-        right: 16px;
-        width: auto;
+        left: 0;
+        right: auto;
+        width: calc(var(--timd-panel-width) + var(--timd-sidebar-collapsed-width));
     }
 
     .timd-scene-navigator__panel {
