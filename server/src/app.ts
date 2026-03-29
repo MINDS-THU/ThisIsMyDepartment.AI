@@ -10,6 +10,7 @@ import { handleAuthStatusRoute, handleHandoffRoute, handleLoginPageRoute, handle
 import { handleBootstrapRoute } from "./routes/bootstrap";
 import { handleAppendConversationMessageRoute, handleGetConversationRoute } from "./routes/conversation";
 import { handleGetCurrentUserRoute, handleUpdateProfileRoute } from "./routes/profile";
+import { handleSttHealthRoute, handleSttTranscribeRoute } from "./routes/stt";
 import { attachRealtimeServer } from "./services/realtimeServer";
 
 const handleRequest = (request: IncomingMessage, response: ServerResponse): void => {
@@ -99,6 +100,16 @@ const handleRequest = (request: IncomingMessage, response: ServerResponse): void
 
     if (method === "PUT" && requestUrl.pathname === "/api/me/profile") {
         void handleUpdateProfileRoute(request, response);
+        return;
+    }
+
+    if (method === "GET" && requestUrl.pathname === "/api/stt/health") {
+        void handleSttHealthRoute(request, response);
+        return;
+    }
+
+    if (method === "POST" && requestUrl.pathname === "/api/stt/transcribe") {
+        void handleSttTranscribeRoute(request, response);
         return;
     }
 

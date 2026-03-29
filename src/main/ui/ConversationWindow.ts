@@ -19,6 +19,8 @@ export interface ConversationWindowDisplayOptions {
     placeholder?: string;
     submitLabel?: string;
     statusText?: string;
+    indicatorText?: string;
+    indicatorTone?: "neutral" | "active" | "warning" | "error";
     disabled?: boolean;
 }
 
@@ -32,11 +34,14 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
     private placeholder = "Type a message...";
     private submitLabel = "Send";
     private statusText = "Enter to send. Shift+Enter for newline.";
+    private indicatorText = "";
+    private indicatorTone: "neutral" | "active" | "warning" | "error" = "neutral";
     private composerDisabled = false;
     private language: AppLanguage = DEFAULT_LANGUAGE;
     private domRoot?: HTMLDivElement;
     private headerTitle?: HTMLDivElement;
     private headerMeta?: HTMLDivElement;
+    private headerIndicator?: HTMLDivElement;
     private historyElement?: HTMLDivElement;
     private composerInput?: HTMLTextAreaElement;
     private composerSubmit?: HTMLButtonElement;
@@ -59,6 +64,8 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
             this.placeholder = options.placeholder ?? this.placeholder;
             this.submitLabel = options.submitLabel ?? this.submitLabel;
             this.statusText = options.statusText ?? this.statusText;
+            this.indicatorText = options.indicatorText ?? this.indicatorText;
+            this.indicatorTone = options.indicatorTone ?? this.indicatorTone;
             this.composerDisabled = options.disabled ?? this.composerDisabled;
         }
         this.pushDebugEvent("show", {
@@ -124,6 +131,8 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
         this.placeholder = options.placeholder ?? this.placeholder;
         this.submitLabel = options.submitLabel ?? this.submitLabel;
         this.statusText = options.statusText ?? this.statusText;
+        this.indicatorText = options.indicatorText ?? this.indicatorText;
+        this.indicatorTone = options.indicatorTone ?? this.indicatorTone;
         this.composerDisabled = options.disabled ?? this.composerDisabled;
         this.ensureDom();
         this.renderComposerState();
@@ -210,6 +219,25 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
             this.headerTitle.style.textOverflow = "ellipsis";
             heading.appendChild(this.headerTitle);
 
+            const headerActions = document.createElement("div");
+            headerActions.style.display = "flex";
+            headerActions.style.alignItems = "center";
+            headerActions.style.gap = "10px";
+            header.appendChild(headerActions);
+
+            this.headerIndicator = document.createElement("div");
+            this.headerIndicator.style.display = "none";
+            this.headerIndicator.style.alignItems = "center";
+            this.headerIndicator.style.justifyContent = "center";
+            this.headerIndicator.style.minHeight = "30px";
+            this.headerIndicator.style.padding = "6px 10px";
+            this.headerIndicator.style.borderRadius = "999px";
+            this.headerIndicator.style.fontSize = "11px";
+            this.headerIndicator.style.fontWeight = "700";
+            this.headerIndicator.style.letterSpacing = "0.04em";
+            this.headerIndicator.style.whiteSpace = "nowrap";
+            headerActions.appendChild(this.headerIndicator);
+
             const closeButton = document.createElement("button");
             closeButton.type = "button";
             closeButton.textContent = this.t("conversation.close");
@@ -222,7 +250,7 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
             closeButton.style.cursor = "pointer";
             closeButton.addEventListener("click", () => this.onCloseRequested.emit(undefined));
             this.closeButton = closeButton;
-            header.appendChild(closeButton);
+            headerActions.appendChild(closeButton);
 
             this.historyElement = document.createElement("div");
             this.historyElement.style.flex = "1";
@@ -388,6 +416,36 @@ export class ConversationWindow extends SceneNode<ThisIsMyDepartmentApp> {
     private renderComposerState(): void {
         if (!this.composerInput || !this.composerSubmit || !this.statusElement) {
             return;
+        }
+        if (this.headerMeta) {
+            this.headerMeta.textContent = this.modeLabel;
+        }
+        if (this.headerIndicator) {
+            const indicatorVisible = this.indicatorText.trim().length > 0;
+            this.headerIndicator.style.display = indicatorVisible ? "inline-flex" : "none";
+            this.headerIndicator.textContent = this.indicatorText;
+            switch (this.indicatorTone) {
+                case "active":
+                    this.headerIndicator.style.background = "rgba(67, 199, 125, 0.18)";
+                    this.headerIndicator.style.border = "1px solid rgba(100, 226, 154, 0.32)";
+                    this.headerIndicator.style.color = "#b8ffd6";
+                    break;
+                case "warning":
+                    this.headerIndicator.style.background = "rgba(255, 183, 77, 0.18)";
+                    this.headerIndicator.style.border = "1px solid rgba(255, 201, 107, 0.34)";
+                    this.headerIndicator.style.color = "#ffe2aa";
+                    break;
+                case "error":
+                    this.headerIndicator.style.background = "rgba(255, 107, 107, 0.18)";
+                    this.headerIndicator.style.border = "1px solid rgba(255, 140, 140, 0.34)";
+                    this.headerIndicator.style.color = "#ffd0d0";
+                    break;
+                default:
+                    this.headerIndicator.style.background = "rgba(214, 230, 246, 0.12)";
+                    this.headerIndicator.style.border = "1px solid rgba(214, 230, 246, 0.18)";
+                    this.headerIndicator.style.color = "rgba(232, 240, 247, 0.92)";
+                    break;
+            }
         }
         if (this.closeButton) {
             this.closeButton.textContent = this.t("conversation.close");

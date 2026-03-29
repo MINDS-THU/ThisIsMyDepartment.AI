@@ -1,9 +1,14 @@
 import os
 import tempfile
+from pathlib import Path
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import WhisperModel
 import uvicorn
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+MODEL_DIR = SCRIPT_DIR / "models" / "tiny"
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -13,7 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 print("正在从本地文件夹加载轻量级语音识别模型...")
-model = WhisperModel("./models/tiny", device="cpu", compute_type="int8")
+model = WhisperModel(str(MODEL_DIR), device="cpu", compute_type="int8")
 print("模型加载完毕，随时准备接收语音！")
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
@@ -33,4 +38,4 @@ async def transcribe_audio(file: UploadFile = File(...)):
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8001)
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("TIMD_STT_PORT", "8001")))

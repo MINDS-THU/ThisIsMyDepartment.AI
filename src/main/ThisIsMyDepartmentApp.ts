@@ -8,9 +8,11 @@ import { RGBColor } from "../engine/color/RGBColor";
 import { Game } from "../engine/Game";
 import { OnlineService } from "../engine/online/OnlineService";
 import { Camera } from "../engine/scene/Camera";
+import { Animator } from "../engine/scene/animations/Animator";
 import { FadeToBlack } from "../engine/scene/camera/FadeToBlack";
-import { Direction } from "../engine/geom/Direction";
+import { Direction, SimpleDirection } from "../engine/geom/Direction";
 import { ControllerFamily } from "../engine/input/ControllerFamily";
+import type { ScenePointerDownEvent } from "../engine/scene/events/ScenePointerDownEvent";
 import { clamp } from "../engine/util/math";
 import { sleep } from "../engine/util/time";
 import JitsiInstance from "../Jitsi";
@@ -33,14 +35,15 @@ import { PresentationNode } from "./nodes/PresentationNode";
 import { SwitchNode } from "./nodes/SwitchNode";
 import { TextInputNode } from "./nodes/TextInputNode";
 import { LLMAgentNode } from "./nodes/LLMAgentNode";
+import { EnvironmentPlacementPreviewNode } from "./nodes/EnvironmentPlacementPreviewNode";
 import { LLMAgentService } from "./services/LLMAgentService";
 import agentDefinitions from "./agents/index";
 import { logActivity } from "./services/activity";
 import { configureBackendLLMBridge } from "./services/backendLLMBridge";
 import { loadBootstrapState } from "./services/bootstrap";
 import { appendConversationMessage, fetchConversation } from "./services/conversations";
-import { saveAiHostingProfile, saveAvatarProfile, saveCharacterSystemPrompt, saveProfilePreferences, savePublicPersonaProfile } from "./services/profile";
-import { SpeechToTextService } from "./services/SpeechToTextService";
+import { saveAiHostingProfile, saveAvatarProfile, saveProfilePreferences, savePublicPersonaProfile } from "./services/profile";
+import { SpeechToTextService, SpeechToTextStatus } from "./services/SpeechToTextService";
 import { shouldEnableJitsi } from "./runtimeConfig";
 import { createEditableEnvironmentAvatar, deleteEditableEnvironmentAvatar, EditableEnvironmentAvatar, fetchEditableEnvironmentAvatars, saveEditableEnvironmentAvatar } from "./services/environmentAvatarAdmin";
 import { ConversationEntry, ConversationWindow, ConversationWindowDisplayOptions } from "./ui/ConversationWindow";
@@ -86,8 +89,26 @@ interface RemotePresentationSession {
 
 type SpawnedAvatarPresence = NonNullable<RoomInfoEvent["spawnedAvatars"]>[number];
 
+type EnvironmentAvatarPlacementMode = "position" | "walk-area";
+
+interface EnvironmentAvatarPlacementResult {
+    position?: { x: number; y: number };
+    walkArea?: { x: number; y: number; width: number; height: number };
+}
+
+interface EnvironmentAvatarPlacementSession {
+    avatar: EditableEnvironmentAvatar;
+    mode: EnvironmentAvatarPlacementMode;
+    previewNode: EnvironmentPlacementPreviewNode;
+    resolve: (result: EnvironmentAvatarPlacementResult | null) => void;
+    dragAnchor?: { x: number; y: number };
+}
+
+type ConversationSttIndicatorTone = "neutral" | "active" | "warning" | "error";
+
 const RIGHT_ELEVATOR_SPAWN_POINT = { x: 1488, y: 704 };
 const SPAWNED_AVATAR_WANDER_SIZE = 120;
+const SPAWNED_AVATAR_DESPAWN_DURATION_MS = 280;
 
 export interface PresentationAudienceMember {
     id: string;
@@ -139,6 +160,8 @@ export class ThisIsMyDepartmentApp extends Game {
     private sceneNavigatorOverlay?: SceneNavigatorOverlay;
     private settingsOverlay?: SettingsOverlay;
     private sttService?: SpeechToTextService;
+    private sttStatus: SpeechToTextStatus = "inactive";
+    private activeConversationSttStartedAt = 0;
     private interactionHint?: HTMLDivElement;
     private interactionHintText?: HTMLSpanElement;
     private interactionChooserBackdrop?: HTMLDivElement;
@@ -170,8 +193,6 @@ export class ThisIsMyDepartmentApp extends Game {
     private avatarDirectoryRequestVersion = 0;
     private avatarDirectoryError: string | null = null;
     private avatarDirectoryBusyUserId: string | null = null;
-    private avatarDirectoryRefreshTimeoutId: number | null = null;
-    private avatarDirectoryRefreshForcePending = false;
     private environmentAvatarPlacementSession: EnvironmentAvatarPlacementSession | null = null;
     private readonly environmentAvatarUpdatedAt = new Map<string, string>();
     private readonly despawningEnvironmentAvatarIds = new Set<string>();
@@ -312,15 +333,23 @@ export class ThisIsMyDepartmentApp extends Game {
 
         if (!this.sttService) {
             this.sttService = new SpeechToTextService();
-            this.sttService.setCallback((text) => {
+            this.sttService.setStatusCallback(status => {
+                this.sttStatus = status;
+                this.refreshConversationStatusIndicator();
+            });
+            this.sttService.setCallback(({ text, capturedAt }) => {
+                if (capturedAt < this.activeConversationSttStartedAt) {
+                    console.log("STT transcript ignored because it was captured before the active conversation opened.");
+                    return;
+                }
+
                 const speechText = `[语音] ${text}`;
                 if (this.activeLLMConversation) {
-                    void this.submitLLMConversationMessage(speechText);
+                    void this.submitLLMConversationMessage(speechText, { suppressSceneSpeech: true });
                     return;
                 }
                 if (this.activePlayerConversation) {
                     this.submitPlayerConversationMessage(speechText);
-                    this.getPlayer().say(speechText, Math.max(3, text.length * 0.2));
                     return;
                 }
                 console.log("未打开对话框，STT语音转录已拦截。");
@@ -414,12 +443,9 @@ export class ThisIsMyDepartmentApp extends Game {
     public toggleLocalAudio(): boolean {
         const mediaControls = this.ensureMediaControls();
         const enabled = mediaControls.toggleLocalAudio();
-        if (enabled && this.isTranscriptionEnabled) {
-            void this.sttService?.start();
-        } else {
-            this.sttService?.stop();
-        }
         this.refreshConversationMediaState();
+        this.refreshConversationStatusIndicator();
+        this.syncSpeechToTextCaptureState();
         this.characterStatusOverlay?.refresh();
         return enabled;
     }
@@ -516,29 +542,16 @@ export class ThisIsMyDepartmentApp extends Game {
         }
 
         mediaControls.setLocalAudioEnabled(enabled);
-        if (enabled && this.isTranscriptionEnabled) {
-            void this.sttService?.start();
-        } else {
-            this.sttService?.stop();
-        }
-        if (enabled) {
-            void this.sttService?.start();
-        } else {
-            this.sttService?.stop();
-        }
         await this.syncConversationMediaState();
+        this.refreshConversationStatusIndicator();
+        this.syncSpeechToTextCaptureState();
         this.characterStatusOverlay?.refresh();
         return mediaControls.isLocalAudioEnabled();
     }
     public toggleTranscriptionSetting(enable: boolean): void {
         this.isTranscriptionEnabled = enable;
-        if (this.isLocalAudioEnabled()) {
-            if (enable) {
-                void this.sttService?.start();
-            } else {
-                this.sttService?.stop();
-            }
-        }
+        this.syncSpeechToTextCaptureState();
+        this.refreshConversationStatusIndicator();
     }
     public async setLocalVideoEnabled(enabled: boolean): Promise<boolean> {
         const mediaControls = this.ensureMediaControls();
@@ -757,10 +770,6 @@ export class ThisIsMyDepartmentApp extends Game {
         this.applyLanguage(nextLanguage);
     }
 
-    private isCurrentUserAdmin(): boolean {
-        return this.currentUser?.roles.some(role => role.trim().toLowerCase() === "admin") ?? false;
-    }
-
     private async loadEditableEnvironmentAvatars(): Promise<EditableEnvironmentAvatar[]> {
         const avatars = await fetchEditableEnvironmentAvatars();
         return avatars.slice().sort((left, right) => left.displayName.localeCompare(right.displayName));
@@ -870,7 +879,7 @@ export class ThisIsMyDepartmentApp extends Game {
 
         if (session.mode === "position") {
             this.updateEnvironmentPlacementPreviewPosition(event.getX(), event.getY());
-            event.onPointerEnd.connect(endEvent => {
+            event.onPointerEnd.connect((endEvent: { getX(): number; getY(): number }) => {
                 const position = {
                     x: this.roundSceneCoordinate(endEvent.getX()),
                     y: this.roundSceneCoordinate(endEvent.getY())
@@ -887,7 +896,7 @@ export class ThisIsMyDepartmentApp extends Game {
         };
         session.dragAnchor = anchor;
         this.updateEnvironmentPlacementPreviewWalkArea(anchor.x, anchor.y);
-        event.onPointerEnd.connect(endEvent => {
+        event.onPointerEnd.connect((endEvent: { getX(): number; getY(): number }) => {
             const walkArea = this.normalizeEnvironmentWalkArea(anchor, {
                 x: endEvent.getX(),
                 y: endEvent.getY()
@@ -1139,6 +1148,12 @@ export class ThisIsMyDepartmentApp extends Game {
             onComplete?.();
         }, SPAWNED_AVATAR_DESPAWN_DURATION_MS + 40);
     }
+
+    private emitSpawnedAvatarDespawnParticles(_node: LLMAgentNode): void {
+        // The STT PR does not depend on the avatar despawn particle effect.
+        // Keep this as a no-op so the branch compiles while preserving call sites.
+    }
+
     private async enumerateMediaDevices(): Promise<MediaDeviceInfo[]> {
         const mediaDevicesApi = this.JitsiInstance?.JitsiMeetJS.mediaDevices;
         if (mediaDevicesApi?.enumerateDevices) {
@@ -1575,6 +1590,7 @@ export class ThisIsMyDepartmentApp extends Game {
         this.activeLLMConversation = { agent, playerId, pending: false };
         this.touchSpawnedAvatarAgent(agentId);
         this.focusConversation(agentId, { name: agentName, type: "agent" });
+        this.syncSpeechToTextCaptureState();
         this.conversationWindow?.focusComposer();
     }
 
@@ -1591,6 +1607,7 @@ export class ThisIsMyDepartmentApp extends Game {
         activeAgent.say();
         this.handleConversationClosed(activeAgent.getAgentId());
         this.activeLLMConversation = null;
+        this.syncSpeechToTextCaptureState();
     }
 
     public startPlayerConversation(partnerId: string, partnerName: string, options?: { sync?: boolean; focusInput?: boolean }): void {
@@ -1628,6 +1645,7 @@ export class ThisIsMyDepartmentApp extends Game {
             partnerName
         };
         this.refreshConversationMediaState();
+        this.syncSpeechToTextCaptureState();
         if (focusInput) {
             this.conversationWindow?.focusComposer();
         }
@@ -1656,6 +1674,7 @@ export class ThisIsMyDepartmentApp extends Game {
             this.onlineService.sendPlayerConversationEvent(activePartnerId, "close");
         }
         this.refreshConversationMediaState();
+        this.syncSpeechToTextCaptureState();
         this.updateConversationMediaLayout();
     }
 
@@ -2344,9 +2363,6 @@ export class ThisIsMyDepartmentApp extends Game {
             onTeleport: roomId => {
                 this.teleportToRoom(roomId);
             },
-            onRefreshUsers: async () => {
-                await this.refreshAvatarDirectory(true);
-            },
             onSpawnAvatar: async userId => {
                 await this.spawnAvatarFromDirectory(userId);
             }
@@ -2393,6 +2409,8 @@ export class ThisIsMyDepartmentApp extends Game {
             statusText = this.t("conversation.status.playerInactive");
         }
 
+        const sttIndicator = this.getConversationSttIndicator();
+
         return {
             modeLabel: partner.type === "agent" ? this.t("conversation.mode.agent") : this.t("conversation.mode.player"),
             placeholder: partner.type === "agent"
@@ -2400,6 +2418,8 @@ export class ThisIsMyDepartmentApp extends Game {
                 : this.t("conversation.placeholder.player", { name: partner.name }),
             submitLabel: pending ? this.t("conversation.submit.waiting") : this.t("conversation.submit.send"),
             statusText,
+            indicatorText: sttIndicator.text,
+            indicatorTone: sttIndicator.tone,
             disabled
         };
     }
@@ -2460,9 +2480,11 @@ export class ThisIsMyDepartmentApp extends Game {
             this.conversationLogs.set(partnerId, []);
         }
         this.activeConversationPartner = partnerId;
+        this.activeConversationSttStartedAt = Date.now();
         this.presentConversation(partnerId);
         this.repositionConversationWindow();
         this.updateConversationMediaLayout();
+        this.syncSpeechToTextCaptureState();
         void this.syncStoredConversation(partnerId, partner.type, partner.name);
     }
 
@@ -2486,14 +2508,16 @@ export class ThisIsMyDepartmentApp extends Game {
         });
         if (this.activeConversationPartner === partnerId) {
             this.activeConversationPartner = null;
+            this.activeConversationSttStartedAt = 0;
             this.conversationWindow?.blurComposer();
             this.conversationWindow?.hideWindow();
         }
+        this.syncSpeechToTextCaptureState();
         this.updateConversationMediaLayout();
         this.repositionChatInputs();
     }
 
-    private async submitLLMConversationMessage(text: string): Promise<void> {
+    private async submitLLMConversationMessage(text: string, options?: { suppressSceneSpeech?: boolean }): Promise<void> {
         const conversation = this.activeLLMConversation;
         const trimmed = text.trim();
         if (!conversation || !trimmed) {
@@ -2518,8 +2542,10 @@ export class ThisIsMyDepartmentApp extends Game {
         this.conversationWindow?.clearComposer();
         this.presentConversation(agentId);
 
-        const duration = this.llmService.estimateSpeechDuration(trimmed);
-        player.say(trimmed, duration);
+        if (!options?.suppressSceneSpeech) {
+            const duration = this.llmService.estimateSpeechDuration(trimmed);
+            player.say(trimmed, duration);
+        }
         agent.say("...", 4);
 
         this.appendConversationEntry(agentId, {
@@ -3228,6 +3254,71 @@ export class ThisIsMyDepartmentApp extends Game {
 
     private refreshConversationMediaState(): void {
         void this.syncConversationMediaState();
+    }
+
+    private syncSpeechToTextCaptureState(): void {
+        const shouldCapture = this.activeConversationPartner !== null && this.isLocalAudioEnabled() && this.isTranscriptionEnabled;
+        if (shouldCapture) {
+            void this.sttService?.start();
+            return;
+        }
+
+        this.sttService?.stop();
+    }
+
+    private refreshConversationStatusIndicator(): void {
+        if (!this.activeConversationPartner) {
+            return;
+        }
+        const partner = this.conversationPartners.get(this.activeConversationPartner);
+        if (!partner) {
+            return;
+        }
+        this.conversationWindow?.updateComposer(this.getConversationWindowOptions(this.activeConversationPartner, partner));
+    }
+
+    private getConversationSttIndicator(): { text: string; tone: ConversationSttIndicatorTone } {
+        if (!this.isLocalAudioEnabled()) {
+            return {
+                text: this.t("conversation.stt.audioOff"),
+                tone: "neutral"
+            };
+        }
+
+        if (!this.isTranscriptionEnabled) {
+            return {
+                text: this.t("conversation.stt.disabled"),
+                tone: "warning"
+            };
+        }
+
+        switch (this.sttStatus) {
+            case "starting":
+                return {
+                    text: this.t("conversation.stt.starting"),
+                    tone: "active"
+                };
+            case "transcribing":
+                return {
+                    text: this.t("conversation.stt.transcribing"),
+                    tone: "active"
+                };
+            case "error":
+                return {
+                    text: this.t("conversation.stt.error"),
+                    tone: "error"
+                };
+            case "listening":
+                return {
+                    text: this.t("conversation.stt.listening"),
+                    tone: "active"
+                };
+            default:
+                return {
+                    text: this.t("conversation.stt.ready"),
+                    tone: "neutral"
+                };
+        }
     }
 }
 
