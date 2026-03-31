@@ -18,6 +18,20 @@ export const readRequestBody = async (request: IncomingMessage): Promise<string>
     return collectBody(request);
 };
 
+export const readRequestBuffer = async (request: IncomingMessage): Promise<Buffer> => {
+    const chunks: Buffer[] = [];
+
+    return new Promise((resolve, reject) => {
+        request.on("data", chunk => {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        request.on("end", () => {
+            resolve(Buffer.concat(chunks));
+        });
+        request.on("error", reject);
+    });
+};
+
 export const parseJsonBody = async <T>(request: IncomingMessage): Promise<T> => {
     const rawBody = await collectBody(request);
     if (!rawBody.trim()) {

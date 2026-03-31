@@ -26,6 +26,7 @@ export class CharacterStatusOverlay {
     private statusValue?: HTMLDivElement;
     private audioToggleButton?: HTMLButtonElement;
     private videoToggleButton?: HTMLButtonElement;
+    private sttToggleButton?: HTMLButtonElement;
     private app?: ThisIsMyDepartmentApp;
     private collapsed = false;
     private lastSnapshotKey = "";
@@ -65,6 +66,7 @@ export class CharacterStatusOverlay {
         this.statusValue = undefined;
         this.audioToggleButton = undefined;
         this.videoToggleButton = undefined;
+        this.sttToggleButton = undefined;
         this.app = undefined;
         this.lastSnapshotKey = "";
         this.statsUserId = "";
@@ -103,7 +105,8 @@ export class CharacterStatusOverlay {
             hasAvatar: !!profile?.avatar,
             connected: this.app.onlineService?.isConnected() ?? false,
             audioEnabled: this.app.isLocalAudioEnabled(),
-            videoEnabled: this.app.isLocalVideoEnabled()
+            videoEnabled: this.app.isLocalVideoEnabled(),
+            transcriptionEnabled: this.app.isTranscriptionEnabled
         });
 
         if (snapshotKey !== this.lastSnapshotKey) {
@@ -221,7 +224,7 @@ export class CharacterStatusOverlay {
 
         const mediaButtons = document.createElement("div");
         mediaButtons.style.display = "grid";
-        mediaButtons.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))";
+        mediaButtons.style.gridTemplateColumns = "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.35fr)";
         mediaButtons.style.gap = "6px";
         mediaButtons.style.marginTop = "2px";
         this.audioToggleButton = this.createMediaButton(app.t("status.audio.off"), () => {
@@ -232,8 +235,15 @@ export class CharacterStatusOverlay {
             this.app?.toggleLocalVideo();
             this.refresh();
         });
+        this.sttToggleButton = this.createMediaButton(app.isTranscriptionEnabled ? app.t("status.stt.on") : app.t("status.stt.off"), () => {
+            const currentState = this.app?.isTranscriptionEnabled ?? true;
+            this.app?.toggleTranscriptionSetting(!currentState);
+            this.refresh();
+        });
+
         mediaButtons.appendChild(this.audioToggleButton);
         mediaButtons.appendChild(this.videoToggleButton);
+        mediaButtons.appendChild(this.sttToggleButton);
         identity.appendChild(mediaButtons);
 
         const statsGrid = document.createElement("div");
@@ -438,13 +448,18 @@ export class CharacterStatusOverlay {
         button.type = "button";
         button.textContent = label;
         button.style.padding = "5px 6px";
+        button.style.minWidth = "0";
         button.style.border = `1px solid ${CharacterStatusOverlay.BORDER_COLOR}`;
         button.style.background = CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;
         button.style.color = CharacterStatusOverlay.PANEL_TEXT;
         button.style.cursor = "pointer";
-        button.style.font = `600 10px ${getUiFontStack(this.app?.getLanguage() ?? "en")}`;
+        button.style.font = `600 9px ${getUiFontStack(this.app?.getLanguage() ?? "en")}`;
         button.style.textTransform = "uppercase";
-        button.style.letterSpacing = "0.06em";
+        button.style.letterSpacing = "0.02em";
+        button.style.whiteSpace = "nowrap";
+        button.style.wordBreak = "keep-all";
+        button.style.overflow = "hidden";
+        button.style.textOverflow = "ellipsis";
         button.onclick = onClick;
         return button;
     }
@@ -514,6 +529,16 @@ export class CharacterStatusOverlay {
                 ? CharacterStatusOverlay.BUTTON_BACKGROUND_ACTIVE
                 : CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;
             this.videoToggleButton.style.borderColor = videoEnabled
+                ? "rgba(122, 170, 255, 0.38)"
+                : CharacterStatusOverlay.BORDER_COLOR;
+        }
+        if (this.sttToggleButton) {
+            const sttEnabled = this.app.isTranscriptionEnabled;
+            this.sttToggleButton.textContent = sttEnabled ? this.app.t("status.stt.on") : this.app.t("status.stt.off");
+            this.sttToggleButton.style.background = sttEnabled
+                ? CharacterStatusOverlay.BUTTON_BACKGROUND_ACTIVE
+                : CharacterStatusOverlay.BUTTON_BACKGROUND_INACTIVE;
+            this.sttToggleButton.style.borderColor = sttEnabled
                 ? "rgba(122, 170, 255, 0.38)"
                 : CharacterStatusOverlay.BORDER_COLOR;
         }
