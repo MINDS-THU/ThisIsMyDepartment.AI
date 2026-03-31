@@ -339,11 +339,11 @@ export class ThisIsMyDepartmentApp extends Game {
             });
             this.sttService.setCallback(({ text, capturedAt }) => {
                 if (capturedAt < this.activeConversationSttStartedAt) {
-                    console.log("STT transcript ignored because it was captured before the active conversation opened.");
                     return;
                 }
 
                 const speechText = `[语音] ${text}`;
+
                 if (this.activeLLMConversation) {
                     void this.submitLLMConversationMessage(speechText, { suppressSceneSpeech: true });
                     return;
@@ -352,11 +352,9 @@ export class ThisIsMyDepartmentApp extends Game {
                     this.submitPlayerConversationMessage(speechText);
                     return;
                 }
-                console.log("未打开对话框，STT语音转录已拦截。");
-                return; 
+                this.getPlayer().say(text, Math.max(3, text.length * 0.2)); 
             });
         }
-
         this.rebuildSceneRoomDirectory();
         this.syncSpawnedAvatarRoster(Array.from(this.spawnedAvatarPresences.values()));
         void this.refreshAvatarDirectory();
@@ -3257,7 +3255,7 @@ export class ThisIsMyDepartmentApp extends Game {
     }
 
     private syncSpeechToTextCaptureState(): void {
-        const shouldCapture = this.activeConversationPartner !== null && this.isLocalAudioEnabled() && this.isTranscriptionEnabled;
+        const shouldCapture = this.isLocalAudioEnabled() && this.isTranscriptionEnabled;
         if (shouldCapture) {
             void this.sttService?.start();
             return;
